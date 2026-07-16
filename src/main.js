@@ -108,19 +108,24 @@ root.innerHTML = `
 
       <section class="decision-panel">
         <div class="decision-panel-head">
-          <div><p class="eyebrow">DECISION FIRST</p><h2>当前建议</h2></div>
-          <div class="horizon-control" aria-label="选择继续持有天数"><span>决策窗口</span><div id="horizon-buttons"></div></div>
+          <div><p class="eyebrow">DECISION FIRST</p><h2>怎么处理这批库存</h2></div>
+          <div class="horizon-control" aria-label="选择继续持有天数"><span>比较继续销售多久</span><div id="horizon-buttons"></div></div>
         </div>
+        <div id="decision-scope" class="decision-scope"></div>
         <div id="recommendation-banner" class="recommendation-banner"></div>
         <div id="scenario-grid" class="scenario-grid"></div>
+        <div id="decision-reason" class="decision-reason"></div>
+        <div id="removal-reference" class="removal-reference"></div>
 
         <div class="decision-support-grid">
           <section class="support-panel sensitivity-panel">
-            <div class="subsection-head"><div><p class="eyebrow">SALES SENSITIVITY</p><h3>销量变化后建议是否成立</h3></div><p>最近30日销量 ±30%</p></div>
+            <div class="subsection-head"><div><p class="eyebrow">SALES CHECK</p><h3>销量变动会改变结论吗？</h3></div><p>按最近30日销量上下浮动30%</p></div>
+            <p id="sensitivity-conclusion" class="sensitivity-conclusion"></p>
             <div id="sensitivity-grid" class="sensitivity-grid"></div>
           </section>
           <section class="support-panel forecast-panel">
-            <div class="subsection-head"><div><p class="eyebrow">HOLDING COST</p><h3>继续放置新增仓储费</h3></div><b id="forecast-coverage"></b></div>
+            <div class="subsection-head"><div><p class="eyebrow">HOLDING COST</p><h3>继续放会多付多少仓储费？</h3></div><b id="forecast-coverage"></b></div>
+            <p id="forecast-summary" class="forecast-summary"></p>
             <div id="forecast-chart" class="forecast-chart"></div>
             <div class="forecast-legend"><span class="base-dot"></span>基础仓储费 <span class="aged-dot"></span>库存龄附加费</div>
             <div id="forecast-driver" class="forecast-driver"></div>
@@ -312,13 +317,35 @@ function render() {
   document.querySelector("#horizon-buttons").innerHTML = FORECAST_HORIZONS.map((days) => `<button type="button" data-horizon="${days}" class="${days === selectedHorizon ? "active" : ""}">${days} 天</button>`).join("");
 
   const completeComparison = forecast.readiness.actionSkuCount > 0 && forecast.readiness.comparison === forecast.readiness.actionSkuCount;
-  const recommendationTitle = summary.actionUnits <= 0 ? "当前无需处理计费库龄库存" : forecast.recommendation.label;
-  const recommendationValue = forecast.recommendation.key === "hold" ? forecast.holdThenLiquidateValue : forecast.recommendation.key === "liquidate" ? summary.liquidationNet : null;
-  const breakEvenText = summary.decisionBreakEvenDays ? `预计最晚处理窗口：${summary.decisionBreakEvenDays} 天` : "365 天内未出现整体清算临界点";
+  const comparable = Number.isFinite(forecast.holdThenLiquidateValue) && Number.isFinite(summary.liquidationNet);
+  const decisionDifference = comparable ? Math.abs(forecast.holdThenLiquidateValue - summary.liquidationNet) : null;
+  const recommendationTitle = summary.actionUnits <= 0
+    ? "当前无需处理"
+    : forecast.recommendation.key === "liquidate"
+      ? "现在清算"
+      : forecast.recommendation.key === "hold"
+        ? `继续销售 ${selectedHorizon} 天`
+        : "先补全数据，再决定";
+  const comparisonText = forecast.recommendation.key === "liquidate" && decisionDifference !== null
+    ? `与继续销售 ${selectedHorizon} 天相比`
+    : forecast.recommendation.key === "hold" && decisionDifference !== null
+      ? "与现在清算相比"
+      : completeComparison
+        ? "两种方案的预计现金结果接近"
+        : `仍有 ${number(Math.max(0, forecast.readiness.actionSkuCount - forecast.readiness.comparison))} 个计费 SKU 缺少比较数据`;
+  const breakEvenText = summary.decisionBreakEvenDays
+    ? summary.decisionBreakEvenDays <= 1
+      ? "从现在起继续放置已不划算"
+      : `继续销售超过约 ${summary.decisionBreakEvenDays} 天后，预计不如现在清算`
+    : "未来 365 天内未出现整体清算临界点";
+
+  document.querySelector("#decision-scope").innerHTML = summary.actionUnits > 0
+    ? `本次只判断进入长期仓储计费区间的库存：<strong>${number(summary.actionUnits)} 件</strong>，涉及 <strong>${number(summary.readiness.actionSkuCount)} 个 SKU</strong>。预计冗余库存不参与清算或移除测算。`
+    : "当前没有进入长期仓储计费区间的库存，无需比较清算或移除。";
   document.querySelector("#recommendation-banner").className = `recommendation-banner tone-${forecast.recommendation.key}`;
   document.querySelector("#recommendation-banner").innerHTML = `
-    <div><span>当前建议 · ${selectedHorizon} 天窗口</span><h3>${escapeHtml(recommendationTitle)}</h3><p>${completeComparison ? "已比较继续销售后清算剩余与立即清算两种未来现金路径。" : `只覆盖 ${number(forecast.readiness.comparison)}/${number(forecast.readiness.actionSkuCount)} 个计费 SKU，暂不建议直接执行。`}</p></div>
-    <div class="recommendation-value"><span>该路径预计净现金贡献</span><strong>${moneyOrPending(recommendationValue)}</strong><small>${escapeHtml(breakEvenText)}</small></div>
+    <div><span>建议怎么做</span><h3>${escapeHtml(recommendationTitle)}</h3><p>${escapeHtml(comparisonText)}</p></div>
+    <div class="recommendation-value"><span>预计多保留现金</span><strong>${decisionDifference === null ? "待补数据" : money(decisionDifference)}</strong><small>${escapeHtml(breakEvenText)}</small></div>
   `;
 
   const fullBookPnl = summary.readiness.actionSkuCount > 0 && summary.readiness.bookPnl === summary.readiness.actionSkuCount;
@@ -326,17 +353,31 @@ function render() {
   const liquidationBookPnl = summary.actionUnits <= 0 ? "无计费库存" : fullBookPnl ? money(summary.liquidationBookProfit) : `待补 ${number(summary.readiness.actionSkuCount - summary.readiness.bookPnl)} 个 SKU`;
   const removalTotalLoss = summary.actionUnits <= 0 ? "无计费库存" : fullRemovalLoss ? money(summary.removalTotalLoss) : `待补 ${number(summary.readiness.actionSkuCount - summary.readiness.removalLoss)} 个 SKU`;
   document.querySelector("#scenario-grid").innerHTML = `
-    <article class="scenario-card hold ${forecast.recommendation.key === "hold" ? "recommended" : ""}"><div><span>继续销售 ${selectedHorizon} 天，再清算剩余</span><b>${forecast.recommendation.key === "hold" ? "建议" : "路径一"}</b></div><h3>${moneyOrPending(forecast.holdThenLiquidateValue)}</h3><dl><div><dt>新增仓储费</dt><dd>-${moneyOrPending(forecast.totalHoldingCost)}</dd></div><div><dt>预计售出 / 剩余</dt><dd>${number(forecast.expectedSoldUnits)} / ${number(forecast.remainingUnits)} 件</dd></div></dl></article>
-    <article class="scenario-card liquidate ${forecast.recommendation.key === "liquidate" ? "recommended" : ""}"><div><span>立即清算</span><b>${forecast.recommendation.key === "liquidate" ? "建议" : "路径二"}</b></div><h3>${money(summary.liquidationNet)}</h3><dl><div><dt>预计净回收</dt><dd>${money(summary.liquidationNet)}</dd></div><div><dt>扣历史成本后账面损益</dt><dd>${liquidationBookPnl}</dd></div></dl></article>
-    <article class="scenario-card remove reference"><div><span>立即移除</span><b>仅作成本参考</b></div><h3>${money(-summary.removalFee)}</h3><dl><div><dt>Amazon 移除费现金影响</dt><dd>${money(-summary.removalFee)}</dd></div><div><dt>含采购与头程的总损失</dt><dd>${removalTotalLoss}</dd></div></dl><p>缺少移除后回收价值和下游成本，因此不参与最终推荐。</p></article>
+    <article class="scenario-card hold ${forecast.recommendation.key === "hold" ? "recommended" : ""}"><div><span>方案 A · 继续销售 ${selectedHorizon} 天</span><b>${forecast.recommendation.key === "hold" ? "推荐" : "对比方案"}</b></div><p class="scenario-value-label">期末预计可留下的现金</p><h3>${moneyOrPending(forecast.holdThenLiquidateValue)}</h3><dl><div><dt>期间新增仓储费</dt><dd>-${moneyOrPending(forecast.totalHoldingCost)}</dd></div><div><dt>预计售出</dt><dd>${number(forecast.expectedSoldUnits)} 件</dd></div><div><dt>到期仍剩</dt><dd>${number(forecast.remainingUnits)} 件</dd></div></dl></article>
+    <article class="scenario-card liquidate ${forecast.recommendation.key === "liquidate" ? "recommended" : ""}"><div><span>方案 B · 现在清算</span><b>${forecast.recommendation.key === "liquidate" ? "推荐" : "对比方案"}</b></div><p class="scenario-value-label">现在预计可收回的现金</p><h3>${money(summary.liquidationNet)}</h3><dl><div><dt>等待时间</dt><dd>0 天</dd></div><div><dt>新增仓储费</dt><dd>${money(0)}</dd></div><div><dt>扣历史成本后账面损益</dt><dd>${liquidationBookPnl}</dd></div></dl></article>
   `;
 
+  const reasonText = forecast.recommendation.key === "liquidate" && decisionDifference !== null
+    ? `继续放 ${selectedHorizon} 天预计还要支付 ${money(forecast.totalHoldingCost)} 仓储费，期末仍剩 ${number(forecast.remainingUnits)} 件；现在清算预计多保留 ${money(decisionDifference)} 现金。`
+    : forecast.recommendation.key === "hold" && decisionDifference !== null
+      ? `继续销售 ${selectedHorizon} 天预计售出 ${number(forecast.expectedSoldUnits)} 件，即使计入 ${money(forecast.totalHoldingCost)} 仓储费，仍比现在清算多保留 ${money(decisionDifference)} 现金。`
+      : `两种方案只完成 ${number(forecast.readiness.comparison)}/${number(forecast.readiness.actionSkuCount)} 个计费 SKU 的比较，请先补全售价、佣金或 FBA 配送费。`;
+  document.querySelector("#decision-reason").innerHTML = `<b>为什么：</b>${escapeHtml(reasonText)}`;
+  document.querySelector("#removal-reference").innerHTML = `<div><b>移除费用参考（不参与建议）</b><span>缺少移除后的回收价值和下游处理成本，不能与清算直接比较。</span></div><dl><div><dt>Amazon 移除费</dt><dd>${money(-summary.removalFee)}</dd></div><div><dt>含采购与头程的总损失</dt><dd>${removalTotalLoss}</dd></div></dl>`;
+
+  const sensitivityKeys = forecast.sensitivity.map((scenario) => scenario.recommendation.key);
+  const sensitivityStable = sensitivityKeys.length > 0 && sensitivityKeys.every((key) => key === sensitivityKeys[0]) && sensitivityKeys[0] !== "pending";
+  const sensitivityRecommendation = sensitivityKeys[0] === "liquidate" ? "现在清算" : sensitivityKeys[0] === "hold" ? `继续销售 ${selectedHorizon} 天` : "待补数据";
+  document.querySelector("#sensitivity-conclusion").textContent = sensitivityStable
+    ? `结论稳定：销量下降 30%、保持不变或提高 30%，建议都仍是“${sensitivityRecommendation}”。`
+    : "结论会随销量变化，请查看三个情景，并优先核对销量预测。";
   document.querySelector("#sensitivity-grid").innerHTML = forecast.sensitivity.map((scenario) => `
-    <article class="sensitivity-item ${scenario.key === "baseline" ? "baseline" : ""}"><div><span>${scenario.label}情景</span><b>销量 ${scenario.multiplier === 1 ? "基准" : scenario.multiplier < 1 ? "−30%" : "+30%"}</b></div><strong>${escapeHtml(scenario.recommendation.label)}</strong><dl><div><dt>继续持有后净现金</dt><dd>${moneyOrPending(scenario.holdThenLiquidateValue)}</dd></div><div><dt>新增仓储费</dt><dd>${money(scenario.totalHoldingCost)}</dd></div></dl></article>
+    <article class="sensitivity-item ${scenario.key === "baseline" ? "baseline" : ""}"><div><span>销量 ${scenario.multiplier === 1 ? "不变" : scenario.multiplier < 1 ? "下降 30%" : "提高 30%"}</span><b>${scenario.recommendation.key === "liquidate" ? "现在清算" : scenario.recommendation.key === "hold" ? `继续销售 ${selectedHorizon} 天` : "待补数据"}</b></div><small>继续销售后的现金结果 ${moneyOrPending(scenario.holdThenLiquidateValue)}</small></article>
   `).join("");
 
   const maxForecastCost = Math.max(1, ...summary.forecasts.map((item) => item.totalHoldingCost || 0));
   document.querySelector("#forecast-coverage").textContent = `费用覆盖 ${number(forecast.readiness.storage)}/${number(forecast.readiness.actionSkuCount)} 个计费 SKU`;
+  document.querySelector("#forecast-summary").innerHTML = `继续放 <b>${selectedHorizon} 天</b>，预计累计新增 <strong>${money(forecast.totalHoldingCost)}</strong> 仓储费。`;
   document.querySelector("#forecast-chart").innerHTML = summary.forecasts.map((item) => {
     const baseWidth = Math.max(0, item.baseStorageCost / maxForecastCost * 100);
     const agedWidth = Math.max(0, item.agedSurchargeCost / maxForecastCost * 100);
