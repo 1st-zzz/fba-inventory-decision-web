@@ -8,12 +8,13 @@ import {
   workbookToSources,
 } from "../src/analyzer.js";
 
-test("detects the five supported report types", () => {
+test("detects the six supported report types", () => {
   assert.equal(detectReportType(["sku", "available", "units-shipped-t30"]), "inventory");
   assert.equal(detectReportType(["merchant_sku", "0 - 180", "181 - 210"]), "age");
   assert.equal(detectReportType(["fnsku", "estimated_monthly_storage_fee"]), "charge");
   assert.equal(detectReportType(["seller-sku", "estimated-referral-fee-per-item"]), "commission");
   assert.equal(detectReportType(["seller-sku", "item-name", "asin1"]), "products");
+  assert.equal(detectReportType(["seller-sku", "unit-cost", "fulfillment-fee-per-unit", "first-mile-cost-rate"]), "costs");
 });
 
 test("parses and merges synthetic reports without server state", () => {
@@ -60,6 +61,8 @@ test("liquidation headline excludes product and first-mile costs", () => {
       price: 100,
       productCost: 30,
       firstMileCost: 5,
+      referralFee: 15,
+      fulfillmentFee: 10,
       ageMode: "detailed",
       age: {},
       weight: 0.4,
@@ -70,6 +73,60 @@ test("liquidation headline excludes product and first-mile costs", () => {
   assert.equal(row.liquidationNet, 61.25);
   assert.equal(row.knownProductCost, 300);
   assert.equal(row.knownFirstMileCost, 50);
+  assert.equal(row.normalSaleNetPerUnit, 75);
+  assert.equal(row.normalSaleFullProfitPerUnit, 40);
+  assert.equal(row.liquidationBookProfit, -288.75);
+});
+
+test("uses a global first-mile percentage when a SKU override is absent", () => {
+  const result = analyzeSources([{
+    fileName: "demo.csv",
+    sheetName: "Sheet1",
+    type: "inventory",
+    label: "库存报告",
+    rows: [{
+      sku: "DEMO-RATE-001",
+      available: 5,
+      sales30: 1,
+      excess: 2,
+      price: 100,
+      productCost: 30,
+      referralFee: 15,
+      fulfillmentFee: 10,
+      weight: 0.4,
+      sizeTier: "standard",
+      ageMode: "detailed",
+      age: {},
+    }],
+  }], "US", { defaultFirstMileRate: 8 });
+  const row = result.rows[0];
+  assert.equal(row.firstMileRate, 0.08);
+  assert.equal(row.firstMileCost, 8);
+  assert.equal(row.normalSaleFullProfitPerUnit, 37);
+});
+
+test("parses a cost supplement and merges it by seller SKU", () => {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+    ["seller-sku", "unit-cost", "fulfillment-fee-per-unit", "first-mile-cost-rate"],
+    ["DEMO-COST-002", 6.5, 3.25, "7.5%"],
+  ]), "Costs");
+  const parsed = workbookToSources(workbook, "costs.xlsx", XLSX, "US");
+  assert.equal(parsed[0].type, "costs");
+  assert.equal(parsed[0].rows[0].firstMileRate, 0.075);
+
+  const result = analyzeSources([{
+    fileName: "inventory.xlsx",
+    sheetName: "Inventory",
+    type: "inventory",
+    label: "库存报告",
+    rows: [{ sku: "DEMO-COST-002", available: 10, sales30: 2, excess: 4, price: 20, referralFee: 3, weight: 0.5, sizeTier: "standard", ageMode: "detailed", age: {} }],
+  }, ...parsed], "US");
+  const row = result.rows[0];
+  assert.equal(row.productCost, 6.5);
+  assert.equal(row.fulfillmentFee, 3.25);
+  assert.equal(row.firstMileCost, 1.5);
+  assert.equal(row.normalSaleFullProfitPerUnit, 5.75);
 });
 
 test("public demo uses only synthetic identifiers", () => {

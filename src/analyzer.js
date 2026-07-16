@@ -6,6 +6,7 @@ const REPORT_LABELS = {
   charge: "仓储收费报告",
   commission: "佣金预览报告",
   products: "所有商品报告",
+  costs: "成本补充表",
   unknown: "未识别文件",
 };
 
@@ -14,6 +15,7 @@ const recognizedHeaders = new Set([
   "available", "fc-transfer", "units-shipped-t30", "estimated-excess-quantity",
   "181-210", "211-240", "241-270", "estimated-monthly-storage-fee",
   "item-volume", "weight", "estimated-referral-fee-per-item", "item-name",
+  "unit-cost", "product-cost", "fulfillment-fee-per-unit", "first-mile-cost-rate",
 ]);
 
 export function normalizeHeader(value) {
@@ -27,12 +29,19 @@ export function normalizeHeader(value) {
 
 function numberOrNull(value) {
   if (value === "" || value === null || value === undefined) return null;
-  const parsed = Number(String(value).replace(/[$£€¥,]/g, "").trim());
+  const parsed = Number(String(value).replace(/[$£€¥,%]/g, "").trim());
   return Number.isFinite(parsed) ? parsed : null;
 }
 
 function valueOrZero(value) {
   return numberOrNull(value) ?? 0;
+}
+
+function rateOrNull(value) {
+  const parsed = numberOrNull(value);
+  if (parsed === null || parsed < 0) return null;
+  const normalized = parsed > 1 ? parsed / 100 : parsed;
+  return normalized <= 1 ? normalized : null;
 }
 
 function text(value) {
@@ -83,6 +92,9 @@ export function detectReportType(headers) {
   if (set.has("merchant-sku") && (set.has("181-210") || set.has("0-180"))) return "age";
   if (set.has("available") && (set.has("sku") || set.has("seller-sku"))) return "inventory";
   if (set.has("item-name") && set.has("seller-sku") && (set.has("asin1") || set.has("product-id"))) return "products";
+  const hasCostField = ["unit-cost", "product-cost", "fulfillment-fee-per-unit", "first-mile-cost-rate"]
+    .some((header) => set.has(header));
+  if ((set.has("seller-sku") || set.has("sku")) && hasCostField) return "costs";
   return "unknown";
 }
 
@@ -129,6 +141,8 @@ function rowToSource(type, row, rule) {
       price: firstPositive(row, ["your-price", "featuredoffer-price", "lowest-price-new-plus-shipping", "sales-price", "price"]),
       productCost: numberOrNull(first(row, ["product-cost", "unit-cost", "cost"])),
       firstMileCost: numberOrNull(first(row, ["first-mile-cost", "first-leg-cost", "inbound-cost"])),
+      firstMileRate: rateOrNull(first(row, ["first-mile-cost-rate", "first-mile-rate", "头程占售价比例"])),
+      fulfillmentFee: numberOrNull(first(row, ["fulfillment-fee-per-unit", "fba-fulfillment-fee-per-unit", "estimated-fulfillment-fee-per-item", "estimated-fulfillment-fee-per-unit"])),
       ageMode: "grouped",
       age: {
         "0-180": valueOrZero(first(row, ["inv-age-0-to-90-days"])) + valueOrZero(first(row, ["inv-age-91-to-180-days"])),
@@ -180,6 +194,7 @@ function rowToSource(type, row, rule) {
       product: text(first(row, ["item-name", "product-name"])),
       price: numberOrNull(first(row, ["price", "your-price"])),
       referralFee: numberOrNull(first(row, ["estimated-referral-fee-per-item"])),
+      fulfillmentFee: numberOrNull(first(row, ["fulfillment-fee-per-unit", "fba-fulfillment-fee-per-unit", "estimated-fulfillment-fee-per-item", "estimated-fulfillment-fee-per-unit"])),
     };
   }
   if (type === "products") {
@@ -190,6 +205,18 @@ function rowToSource(type, row, rule) {
       price: numberOrNull(first(row, ["price", "your-price"])),
       productCost: numberOrNull(first(row, ["product-cost", "unit-cost", "cost"])),
       firstMileCost: numberOrNull(first(row, ["first-mile-cost", "first-leg-cost", "inbound-cost"])),
+      firstMileRate: rateOrNull(first(row, ["first-mile-cost-rate", "first-mile-rate", "头程占售价比例"])),
+      fulfillmentFee: numberOrNull(first(row, ["fulfillment-fee-per-unit", "fba-fulfillment-fee-per-unit", "estimated-fulfillment-fee-per-item", "estimated-fulfillment-fee-per-unit"])),
+    };
+  }
+  if (type === "costs") {
+    return {
+      sku: text(first(row, ["seller-sku", "sku", "merchant-sku"])),
+      asin: text(first(row, ["asin", "asin1", "product-id"])),
+      productCost: numberOrNull(first(row, ["unit-cost", "product-cost", "cost", "单件采购成本"])),
+      fulfillmentFee: numberOrNull(first(row, ["fulfillment-fee-per-unit", "fba-fulfillment-fee-per-unit", "estimated-fulfillment-fee-per-item", "estimated-fulfillment-fee-per-unit", "fba正常销售配送费"])),
+      firstMileCost: numberOrNull(first(row, ["first-mile-cost", "first-leg-cost", "inbound-cost", "单件头程"])),
+      firstMileRate: rateOrNull(first(row, ["first-mile-cost-rate", "first-mile-rate", "头程占售价比例"])),
     };
   }
   return null;
@@ -281,7 +308,7 @@ function mergeDefined(target, source) {
 function mergeMissing(target, source) {
   for (const [key, value] of Object.entries(source)) {
     const missing = target[key] === null || target[key] === undefined || target[key] === "";
-    const emptyNumeric = ["price", "productCost", "firstMileCost"].includes(key) && !Number.isFinite(target[key]);
+    const emptyNumeric = ["price", "productCost", "firstMileCost", "firstMileRate", "fulfillmentFee", "referralFee"].includes(key) && !Number.isFinite(target[key]);
     if ((missing || emptyNumeric) && value !== null && value !== undefined && value !== "") target[key] = value;
   }
 }
@@ -289,7 +316,7 @@ function mergeMissing(target, source) {
 export function analyzeSources(parsedSources, marketplace = "US", options = {}) {
   const rule = MARKET_RULES[marketplace];
   if (!rule) throw new Error(`Unsupported marketplace: ${marketplace}`);
-  const byType = { inventory: [], age: [], charge: [], commission: [], products: [] };
+  const byType = { inventory: [], age: [], charge: [], commission: [], products: [], costs: [] };
   for (const source of parsedSources) {
     if (byType[source.type]) byType[source.type].push(...source.rows);
   }
@@ -307,7 +334,7 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
 
   const skuIndex = () => new Map([...items.values()].filter((item) => item.sku).map((item) => [item.sku, item]));
   let bySku = skuIndex();
-  for (const type of ["products", "commission"]) {
+  for (const type of ["products", "commission", "costs"]) {
     for (const row of byType[type]) {
       const item = bySku.get(row.sku);
       if (item) mergeMissing(item, row);
@@ -344,6 +371,7 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
   }
 
   const month = options.month ?? new Date().getMonth() + 1;
+  const defaultFirstMileRate = rateOrNull(options.defaultFirstMileRate);
   const analyzed = [...items.values()].map((item, index) => {
     const available = Number.isFinite(item.available) ? Math.max(0, item.available) : sumAge(item.age);
     const sales30 = Math.max(0, valueOrZero(item.sales30));
@@ -360,6 +388,14 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
       price: valueOrZero(item.price),
       sizeTier: item.sizeTier || "standard",
     };
+    normalized.firstMileRate = Number.isFinite(normalized.firstMileRate)
+      ? normalized.firstMileRate
+      : defaultFirstMileRate;
+    normalized.firstMileCost = Number.isFinite(normalized.firstMileCost)
+      ? normalized.firstMileCost
+      : Number.isFinite(normalized.firstMileRate) && normalized.price > 0
+        ? normalized.price * normalized.firstMileRate
+        : null;
     normalized.aged = agedUnits(normalized, rule);
     normalized.storageEstimate = monthlyStorage(normalized, rule, month);
     normalized.agedFee = ageFee(normalized, rule);
@@ -373,6 +409,21 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
     normalized.removalFee = normalized.removalFeeUnit === null ? null : normalized.removalFeeUnit * excess;
     normalized.knownProductCost = Number.isFinite(normalized.productCost) ? normalized.productCost * excess : null;
     normalized.knownFirstMileCost = Number.isFinite(normalized.firstMileCost) ? normalized.firstMileCost * excess : null;
+    normalized.normalSaleNetPerUnit = normalized.price > 0
+      && Number.isFinite(normalized.referralFee)
+      && Number.isFinite(normalized.fulfillmentFee)
+      ? normalized.price - normalized.referralFee - normalized.fulfillmentFee
+      : null;
+    normalized.normalSaleFullProfitPerUnit = Number.isFinite(normalized.normalSaleNetPerUnit)
+      && Number.isFinite(normalized.productCost)
+      && Number.isFinite(normalized.firstMileCost)
+      ? normalized.normalSaleNetPerUnit - normalized.productCost - normalized.firstMileCost
+      : null;
+    normalized.liquidationBookProfit = Number.isFinite(normalized.liquidationNet)
+      && Number.isFinite(normalized.knownProductCost)
+      && Number.isFinite(normalized.knownFirstMileCost)
+      ? normalized.liquidationNet - normalized.knownProductCost - normalized.knownFirstMileCost
+      : null;
     Object.assign(normalized, calculateRisk(normalized, rule));
     return normalized;
   });
@@ -380,11 +431,15 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
   analyzed.sort((a, b) => b.score - a.score || b.excess - a.excess);
   const sum = (field) => analyzed.reduce((total, row) => total + (Number.isFinite(row[field]) ? row[field] : 0), 0);
   const countReady = (field) => analyzed.filter((row) => Number.isFinite(row[field])).length;
+  const decisionRows = analyzed.filter((row) => row.excess > 0);
   const warnings = [];
   if (!byType.charge.length) warnings.push("未识别仓储收费报告：重量、体积、仓储费、清算处理费和移除费可能无法完整测算。");
   if (!byType.age.length) warnings.push("未识别详细库龄报告：UK/DE 的 241–270 天库存无法从合并区间中准确拆分。");
   if (!byType.commission.length && !byType.products.length) warnings.push("未识别佣金或商品报告：缺少价格的 SKU 无法测算清算预计净回收。");
-  if (!analyzed.some((row) => Number.isFinite(row.productCost))) warnings.push("未提供产品成本和头程成本；清算预计净回收不等于最终利润。");
+  if (!analyzed.some((row) => Number.isFinite(row.productCost))) warnings.push("未提供单件采购成本：清算预计净回收不能换算为账面损益。");
+  if (!analyzed.some((row) => Number.isFinite(row.fulfillmentFee))) warnings.push("未提供 FBA 正常销售配送费：不能计算正常销售单件净回款和完整利润。");
+  if (!analyzed.some((row) => Number.isFinite(row.firstMileCost))) warnings.push("未提供头程占售价比例或单件头程：完整利润暂不扣除头程。");
+  warnings.push("未填写移除后回收价值和下游处理成本：移除方案仅展示 Amazon 移除费，不参与最终收益比较。");
 
   return {
     marketplace,
@@ -401,6 +456,7 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
       storage: sum("storageEstimate"),
       agedFee: sum("agedFee"),
       liquidationNet: sum("liquidationNet"),
+      liquidationBookProfit: sum("liquidationBookProfit"),
       removalFee: sum("removalFee"),
       riskCounts: {
         high: analyzed.filter((row) => row.risk === "高").length,
@@ -411,6 +467,12 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
         price: analyzed.filter((row) => row.price > 0).length,
         fee: countReady("removalFee"),
         age: analyzed.filter((row) => sumAge(row.age) > 0).length,
+        productCost: countReady("productCost"),
+        fulfillmentFee: countReady("fulfillmentFee"),
+        firstMile: countReady("firstMileCost"),
+        saleProfit: countReady("normalSaleFullProfitPerUnit"),
+        bookPnl: decisionRows.filter((row) => Number.isFinite(row.liquidationBookProfit)).length,
+        decisionSkuCount: decisionRows.length,
       },
     },
   };
@@ -438,19 +500,28 @@ export function createDemoAnalysis(marketplace = "US") {
     volume: rule.volumeUnit === "cuft" ? 0.08 + index * 0.01 : 0.0023 + index * 0.0003,
     sizeTier: index === 5 ? "oversize" : "standard", chargeMonth: "2026-07",
   }));
+  const costs = inventory.map((row, index) => ({
+    sku: row.sku,
+    productCost: 4.2 + index * 0.45,
+    fulfillmentFee: 3.1 + index * 0.22,
+    referralFee: row.price * 0.15,
+    firstMileRate: 0.08,
+  }));
   return analyzeSources([
     { fileName: "脱敏演示库存.xlsx", sheetName: "Demo", type: "inventory", label: REPORT_LABELS.inventory, rows: inventory },
     { fileName: "脱敏演示收费.xlsx", sheetName: "Demo", type: "charge", label: REPORT_LABELS.charge, rows: charge },
+    { fileName: "脱敏演示成本.xlsx", sheetName: "Demo", type: "costs", label: REPORT_LABELS.costs, rows: costs },
   ], marketplace, { month: 7 });
 }
 
 export function exportRowsToCsv(rows, currency) {
-  const headers = ["SKU", "ASIN", "Product", "Risk", "Action", "Available", "Sales30", "DaysSupply", "AgedUnits", "ExcessUnits", `Storage_${currency}`, `AgedFee_${currency}`, `LiquidationNet_${currency}`, `RemovalFee_${currency}`];
+  const headers = ["SKU", "ASIN", "Product", "Risk", "Action", "Available", "Sales30", "DaysSupply", "AgedUnits", "ExcessUnits", `SalePrice_${currency}`, `ProductCost_${currency}`, `FBAFulfillmentFee_${currency}`, "FirstMileRate", `FirstMileCost_${currency}`, `NormalSaleNetPerUnit_${currency}`, `NormalSaleFullProfitPerUnit_${currency}`, `Storage_${currency}`, `AgedFee_${currency}`, `LiquidationNet_${currency}`, `LiquidationBookProfit_${currency}`, `RemovalFee_${currency}`];
   const escape = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
   const lines = rows.map((row) => [
     row.sku, row.asin, row.product, row.risk, row.action, row.available, row.sales30,
-    row.daysSupply, row.aged, row.excess, row.storageEstimate, row.agedFee,
-    row.liquidationNet, row.removalFee,
+    row.daysSupply, row.aged, row.excess, row.price, row.productCost, row.fulfillmentFee,
+    row.firstMileRate, row.firstMileCost, row.normalSaleNetPerUnit, row.normalSaleFullProfitPerUnit,
+    row.storageEstimate, row.agedFee, row.liquidationNet, row.liquidationBookProfit, row.removalFee,
   ].map(escape).join(","));
   return ["\ufeff" + headers.join(","), ...lines].join("\r\n");
 }

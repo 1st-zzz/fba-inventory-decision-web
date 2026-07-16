@@ -72,11 +72,19 @@ root.innerHTML = `
         <input id="file-input" type="file" multiple accept=".xlsx,.xls,.xltx,.csv,.tsv" />
         <span class="upload-icon">＋</span>
         <strong>拖入或选择多个运营报告</strong>
-        <small>建议同时上传库存、库龄、收费、佣金和商品报告</small>
+        <small>可分多次选择；建议上传库存、库龄、收费、佣金、商品及成本补充表</small>
       </label>
       <div id="selected-files" class="selected-files"></div>
+      <div class="cost-controls">
+        <label>统一头程占售价比例（%）
+          <input id="first-mile-rate" type="number" min="0" max="100" step="0.1" placeholder="例如 8" />
+          <small>成本表中的 SKU 比例会优先覆盖此处</small>
+        </label>
+        <button id="template-button" class="secondary-button" type="button">下载成本补充模板</button>
+      </div>
       <div class="upload-actions">
         <button id="analyze-button" class="primary-button" disabled>开始本地分析</button>
+        <button id="clear-button" class="secondary-button" disabled>清空文件</button>
         <button id="demo-button" class="secondary-button">恢复脱敏演示</button>
       </div>
       <p class="privacy-note"><b>隐私说明：</b>页面不会把文件发送到 GitHub。刷新或关闭页面后，本次选择和结果即被清除。</p>
@@ -98,12 +106,13 @@ root.innerHTML = `
 
     <section class="decision-section">
       <article class="decision-card keep">
-        <span>继续持有</span><h3>需结合净销售回款</h3>
-        <p>若缺少 FBA 配送费、产品成本和头程，页面不会强行判定继续销售的最终利润。</p>
+        <span>正常销售利润口径</span><h3 id="sale-profit-status">需补成本数据</h3>
+        <p>单件完整利润 = 售价 − 销售佣金 − FBA配送费 − 采购成本 − 头程。仓储费和长期仓储费另行展示。</p>
       </article>
       <article class="decision-card liquidate">
         <span>清算预计净回收</span><h3 id="liquidation-total"></h3>
-        <p>已扣清算转介费和处理费；<b>尚未扣产品成本、头程等成本项</b>，不等于最终利润。</p>
+        <div class="decision-sub"><span>扣采购成本与头程后的账面损益</span><b id="liquidation-book-pnl"></b></div>
+        <p>净回收用于判断今天可收回多少现金；账面损益用于复盘历史成本，两者分开显示。</p>
       </article>
       <article class="decision-card remove">
         <span>立即移除费用</span><h3 id="removal-total"></h3>
@@ -126,7 +135,8 @@ root.innerHTML = `
           <thead><tr>
             <th>SKU / 商品</th><th>风险</th><th>可售</th><th>30日销量</th><th>可售天数</th>
             <th>计费库龄</th><th>冗余</th><th>仓储费</th><th>长期仓储费</th>
-            <th>清算预计净回收</th><th>移除费</th><th>建议动作</th>
+            <th>采购成本/件</th><th>FBA配送费/件</th><th>头程/件</th><th>正常销售完整利润/件</th>
+            <th>清算预计净回收</th><th>清算账面损益</th><th>移除费</th><th>建议动作</th>
           </tr></thead>
           <tbody id="table-body"></tbody>
         </table>
@@ -149,7 +159,28 @@ root.innerHTML = `
 const fileInput = document.querySelector("#file-input");
 const dropzone = document.querySelector("#dropzone");
 const analyzeButton = document.querySelector("#analyze-button");
+const clearButton = document.querySelector("#clear-button");
 const marketplace = document.querySelector("#marketplace");
+const firstMileRateInput = document.querySelector("#first-mile-rate");
+
+const fileKey = (file) => `${file.name}::${file.size}::${file.lastModified}`;
+
+function appendFiles(files) {
+  const known = new Set(selectedFiles.map(fileKey));
+  for (const file of files) {
+    if (!/\.(xlsx|xls|xltx|csv|tsv)$/i.test(file.name)) continue;
+    const key = fileKey(file);
+    if (!known.has(key)) {
+      selectedFiles.push(file);
+      known.add(key);
+    }
+  }
+}
+
+function defaultFirstMileRate() {
+  const value = Number(firstMileRateInput.value);
+  return Number.isFinite(value) && firstMileRateInput.value !== "" ? value / 100 : null;
+}
 
 function setStatus(message, kind = "info") {
   document.querySelector("#status-box").innerHTML = message
@@ -160,9 +191,10 @@ function setStatus(message, kind = "info") {
 function updateSelectedFiles() {
   const container = document.querySelector("#selected-files");
   container.innerHTML = selectedFiles.map((file) => `
-    <span title="${escapeHtml(file.name)}">${escapeHtml(file.name)}<small>${number(file.size / 1024, 0)} KB</small></span>
+    <span title="${escapeHtml(file.name)}">${escapeHtml(file.name)}<small>${number(file.size / 1024, 0)} KB</small><button type="button" data-file-key="${escapeHtml(fileKey(file))}" aria-label="移除 ${escapeHtml(file.name)}">×</button></span>
   `).join("");
   analyzeButton.disabled = selectedFiles.length === 0;
+  clearButton.disabled = selectedFiles.length === 0;
 }
 
 function filteredRows() {
@@ -181,6 +213,10 @@ function metric(label, value, note, tone = "") {
   return `<article class="metric ${tone}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(note)}</small></article>`;
 }
 
+function moneyOrPending(value) {
+  return Number.isFinite(value) ? money(value) : "待补数据";
+}
+
 function render() {
   const { summary, rule } = current;
   document.querySelector("#result-title").textContent = usingDemo ? "脱敏演示结果" : "本地报告分析结果";
@@ -194,6 +230,16 @@ function render() {
     metric("长期仓储费", money(summary.agedFee), "缺体积时不计入汇总"),
   ].join("");
   document.querySelector("#liquidation-total").textContent = money(summary.liquidationNet);
+  const fullBookPnl = summary.readiness.decisionSkuCount > 0
+    && summary.readiness.bookPnl === summary.readiness.decisionSkuCount;
+  document.querySelector("#liquidation-book-pnl").textContent = summary.readiness.decisionSkuCount === 0
+    ? "无冗余库存"
+    : fullBookPnl
+      ? money(summary.liquidationBookProfit)
+      : `待补 ${number(summary.readiness.decisionSkuCount - summary.readiness.bookPnl)} 个冗余 SKU`;
+  document.querySelector("#sale-profit-status").textContent = summary.readiness.saleProfit === summary.skuCount
+    ? `已覆盖 ${number(summary.skuCount)} 个 SKU`
+    : `可计算 ${number(summary.readiness.saleProfit)}/${number(summary.skuCount)} 个 SKU`;
   document.querySelector("#removal-total").textContent = money(summary.removalFee);
 
   const reports = current.reports.filter((report) => report.type !== "unknown");
@@ -202,7 +248,7 @@ function render() {
     : "";
 
   const rows = filteredRows();
-  document.querySelector("#table-body").innerHTML = rows.slice(0, 200).map((row) => `
+  document.querySelector("#table-body").innerHTML = rows.map((row) => `
     <tr>
       <td><b>${escapeHtml(row.sku)}</b><span>${escapeHtml(row.asin)}</span><small>${escapeHtml(row.product)}</small></td>
       <td>${riskBadge(row.risk)}</td>
@@ -211,16 +257,19 @@ function render() {
       <td>${row.daysSupply >= 999 ? "无销量" : number(row.daysSupply)}</td>
       <td>${number(row.aged)}</td>
       <td>${number(row.excess)}</td>
-      <td>${Number.isFinite(row.storageEstimate) ? money(row.storageEstimate) : "待补数据"}</td>
-      <td>${Number.isFinite(row.agedFee) ? money(row.agedFee) : "待补数据"}</td>
-      <td>${Number.isFinite(row.liquidationNet) ? money(row.liquidationNet) : "待补数据"}</td>
-      <td>${Number.isFinite(row.removalFee) ? money(row.removalFee) : "待补数据"}</td>
+      <td>${moneyOrPending(row.storageEstimate)}</td>
+      <td>${moneyOrPending(row.agedFee)}</td>
+      <td>${moneyOrPending(row.productCost)}</td>
+      <td>${moneyOrPending(row.fulfillmentFee)}</td>
+      <td>${moneyOrPending(row.firstMileCost)}</td>
+      <td>${moneyOrPending(row.normalSaleFullProfitPerUnit)}</td>
+      <td>${moneyOrPending(row.liquidationNet)}</td>
+      <td>${moneyOrPending(row.liquidationBookProfit)}</td>
+      <td>${moneyOrPending(row.removalFee)}</td>
       <td><b class="action">${escapeHtml(row.action)}</b></td>
     </tr>
   `).join("");
-  document.querySelector("#table-count").textContent = rows.length > 200
-    ? `匹配 ${number(rows.length)} 个 SKU，当前展示前 200 个；完整结果请导出 CSV。`
-    : `当前展示 ${number(rows.length)} 个 SKU。`;
+  document.querySelector("#table-count").textContent = `当前展示 ${number(rows.length)} 个 SKU；导出 CSV 可获得完整成本和损益字段。`;
 
   const warnings = current.warnings.length ? current.warnings : ["当前报告组合已覆盖主要测算字段；执行前仍应复核费率版本和实际批次库龄。"];
   document.querySelector("#warning-list").innerHTML = warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("");
@@ -240,7 +289,7 @@ async function analyzeSelectedFiles() {
     const recognized = nextSources.filter((source) => source.type !== "unknown" && source.rows.length);
     if (!recognized.length) throw new Error("没有识别到可用报告，请检查文件类型和表头。");
     parsedSources = recognized;
-    current = analyzeSources(parsedSources, marketplace.value);
+    current = analyzeSources(parsedSources, marketplace.value, { defaultFirstMileRate: defaultFirstMileRate() });
     usingDemo = false;
     setStatus(`已在浏览器本地完成分析：识别 ${recognized.length} 个有效工作表，未上传任何文件。`, "success");
     render();
@@ -252,8 +301,17 @@ async function analyzeSelectedFiles() {
 }
 
 fileInput.addEventListener("change", (event) => {
-  selectedFiles = [...event.target.files];
+  appendFiles([...event.target.files]);
+  fileInput.value = "";
   updateSelectedFiles();
+});
+
+document.querySelector("#selected-files").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-file-key]");
+  if (!button) return;
+  selectedFiles = selectedFiles.filter((file) => fileKey(file) !== button.dataset.fileKey);
+  updateSelectedFiles();
+  setStatus("文件列表已更新，点击“开始本地分析”即可重新计算。", "info");
 });
 
 for (const eventName of ["dragenter", "dragover"]) {
@@ -269,11 +327,28 @@ for (const eventName of ["dragleave", "drop"]) {
   });
 }
 dropzone.addEventListener("drop", (event) => {
-  selectedFiles = [...event.dataTransfer.files].filter((file) => /\.(xlsx|xls|xltx|csv|tsv)$/i.test(file.name));
+  appendFiles([...event.dataTransfer.files]);
   updateSelectedFiles();
 });
 
 analyzeButton.addEventListener("click", analyzeSelectedFiles);
+clearButton.addEventListener("click", () => {
+  selectedFiles = [];
+  parsedSources = [];
+  fileInput.value = "";
+  updateSelectedFiles();
+  setStatus("已清空待分析文件。", "success");
+});
+document.querySelector("#template-button").addEventListener("click", () => {
+  const csv = "\ufeffseller-sku,unit-cost,fulfillment-fee-per-unit,first-mile-cost-rate\r\nDEMO-SKU-001,4.50,3.20,8\r\n";
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "fba-cost-input-template.csv";
+  link.click();
+  URL.revokeObjectURL(url);
+});
 document.querySelector("#demo-button").addEventListener("click", () => {
   selectedFiles = [];
   parsedSources = [];
@@ -285,8 +360,16 @@ document.querySelector("#demo-button").addEventListener("click", () => {
   render();
 });
 marketplace.addEventListener("change", () => {
-  current = usingDemo ? createDemoAnalysis(marketplace.value) : analyzeSources(parsedSources, marketplace.value);
+  current = usingDemo
+    ? createDemoAnalysis(marketplace.value)
+    : analyzeSources(parsedSources, marketplace.value, { defaultFirstMileRate: defaultFirstMileRate() });
   render();
+});
+firstMileRateInput.addEventListener("change", () => {
+  if (!usingDemo && parsedSources.length) {
+    current = analyzeSources(parsedSources, marketplace.value, { defaultFirstMileRate: defaultFirstMileRate() });
+    render();
+  }
 });
 document.querySelector("#search-input").addEventListener("input", (event) => {
   query = event.target.value.trim();
