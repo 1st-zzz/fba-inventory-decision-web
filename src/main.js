@@ -8,9 +8,11 @@ import {
 } from "./analyzer.js";
 
 const root = document.querySelector("#app");
+const now = new Date();
+const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 let parsedSources = [];
 let selectedFiles = [];
-let current = createDemoAnalysis("US");
+let current = createDemoAnalysis("US", { analysisDate: today });
 let usingDemo = true;
 let query = "";
 let riskFilter = "全部";
@@ -90,7 +92,7 @@ root.innerHTML = `
               </select>
             </label>
             <label>测算起始日
-              <input id="analysis-date" type="date" value="2026-07-16" />
+              <input id="analysis-date" type="date" value="${today}" />
             </label>
           </div>
           <div class="cost-heading"><div><h3>统一预估成本</h3><p>按当前售价比例计算；成本表中的 SKU 金额或比例优先。</p></div><button id="template-button" class="link-button" type="button">下载成本模板</button></div>

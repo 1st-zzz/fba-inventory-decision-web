@@ -751,6 +751,8 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
 }
 
 export function createDemoAnalysis(marketplace = "US", options = {}) {
+  const demoAnalysisDate = options.analysisDate ?? "2026-07-16";
+  const parsedDemoDate = new Date(`${demoAnalysisDate}T00:00:00`);
   const inventory = [
     ["DEMO-001", "B0DEMO0001", "手工编织工具套装", 180, 0, 0, 180, 24.99],
     ["DEMO-002", "B0DEMO0002", "派对装饰组合", 96, 3, 87, 60, 16.99],
@@ -784,8 +786,8 @@ export function createDemoAnalysis(marketplace = "US", options = {}) {
     { fileName: "脱敏演示收费.xlsx", sheetName: "Demo", type: "charge", label: REPORT_LABELS.charge, rows: charge },
     { fileName: "脱敏演示成本.xlsx", sheetName: "Demo", type: "costs", label: REPORT_LABELS.costs, rows: costs },
   ], marketplace, {
-    month: options.month ?? 7,
-    analysisDate: options.analysisDate ?? "2026-07-16",
+    month: options.month ?? (Number.isFinite(parsedDemoDate.getTime()) ? parsedDemoDate.getMonth() + 1 : 7),
+    analysisDate: demoAnalysisDate,
   });
 }
 
