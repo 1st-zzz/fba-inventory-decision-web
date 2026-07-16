@@ -111,6 +111,23 @@ button, select, label { -webkit-tap-highlight-color: transparent; }
 .metric span, .metric small { display: block; color: var(--muted); font-size: 11px; }
 .metric strong { display: block; margin: 12px 0 8px; overflow: hidden; text-overflow: ellipsis; font-size: clamp(22px, 2vw, 31px); letter-spacing: -.045em; }
 
+.age-panel { margin-top: 18px; padding: 22px; border: 1px solid var(--line); border-radius: 14px; background: white; }
+.age-panel-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; }
+.age-panel-head h2 { font-size: 24px; }
+.age-panel-head > p { margin: 0; color: var(--muted); font-size: 11px; }
+.age-bucket-grid { display: grid; grid-template-columns: repeat(9, minmax(105px, 1fr)); gap: 9px; margin-top: 18px; }
+.age-bucket { min-width: 0; padding: 13px; border: 1px solid var(--line); border-radius: 10px; background: #f8fbfa; }
+.age-bucket.charged { border-color: #efc18d; background: var(--amber-soft); }
+.age-bucket > div { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.age-bucket b { white-space: nowrap; font-size: 11px; }
+.age-bucket span { padding: 3px 5px; border-radius: 999px; color: var(--muted); background: #e8efed; white-space: nowrap; font-size: 8px; font-weight: 800; }
+.age-bucket.charged span { color: #9a5819; background: #f8d5aa; }
+.age-bucket strong { display: block; margin-top: 13px; font-size: 23px; letter-spacing: -.04em; }
+.age-bucket strong small { color: var(--muted); font-size: 10px; font-weight: 600; }
+.age-bucket p, .age-note { margin: 7px 0 0; color: var(--muted); font-size: 9px; }
+.age-note { line-height: 1.6; }
+.age-empty { grid-column: 1 / -1; padding: 18px; border-radius: 9px; color: var(--muted); background: #f4f7f4; font-size: 12px; text-align: center; }
+
 .decision-section { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 18px; }
 .decision-card { padding: 24px; border-radius: 14px; border: 1px solid var(--line); background: white; }
 .decision-card > span { color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .08em; }
@@ -159,6 +176,7 @@ footer p { margin: 0; }
   .summary-grid { grid-template-columns: repeat(3, 1fr); }
   .cost-controls { grid-template-columns: repeat(3, 1fr); }
   .cost-control-heading { grid-column: 1 / -1; }
+  .age-bucket-grid { grid-template-columns: repeat(5, minmax(110px, 1fr)); }
 }
 @media (max-width: 760px) {
   .topbar { padding: 14px 20px; }
@@ -178,6 +196,8 @@ footer p { margin: 0; }
   .cost-controls { grid-template-columns: 1fr; }
   .cost-control-heading { grid-column: auto; }
   .boundary { grid-template-columns: 1fr; gap: 12px; }
+  .age-panel-head { align-items: flex-start; flex-direction: column; }
+  .age-bucket-grid { grid-template-columns: repeat(2, 1fr); }
   footer { flex-direction: column; }
 }
 @media (max-width: 480px) {

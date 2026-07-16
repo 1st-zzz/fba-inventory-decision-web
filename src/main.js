@@ -38,6 +38,12 @@ const money = (value) => new Intl.NumberFormat("zh-CN", {
   maximumFractionDigits: 2,
 }).format(Number(value || 0));
 
+const dateLabel = (value) => {
+  if (!value) return "";
+  if (value instanceof Date && Number.isFinite(value.getTime())) return value.toISOString().slice(0, 10);
+  return String(value).slice(0, 10);
+};
+
 root.innerHTML = `
   <header class="topbar">
     <a class="brand" href="#" aria-label="FBA 库存决策台首页">
@@ -103,6 +109,15 @@ root.innerHTML = `
     <div id="status-box"></div>
     <div id="report-strip" class="report-strip"></div>
     <div id="summary-grid" class="summary-grid"></div>
+
+    <section class="age-panel">
+      <div class="age-panel-head">
+        <div><p class="eyebrow">AGED INVENTORY BUCKETS</p><h2>库龄收费区间库存</h2></div>
+        <p id="age-coverage"></p>
+      </div>
+      <div id="age-bucket-grid" class="age-bucket-grid"></div>
+      <p class="age-note">数据来自最新库龄报告快照；与当前可售库存可能因快照日期、在途和调拨状态不同。</p>
+    </section>
 
     <section class="decision-section">
       <article class="decision-card keep">
@@ -240,6 +255,20 @@ function render() {
     metric("月度仓储费", money(summary.storage), `费用可计算 ${summary.readiness.fee}/${summary.skuCount}`),
     metric("长期仓储费", money(summary.agedFee), "缺体积时不计入汇总"),
   ].join("");
+  const ageBuckets = summary.ageBuckets || [];
+  const ageCoverage = summary.readiness.detailedAge || 0;
+  document.querySelector("#age-coverage").textContent = ageCoverage
+    ? `明细覆盖 ${number(ageCoverage)}/${number(summary.skuCount)} 个 SKU${summary.ageSnapshot ? ` · 快照 ${dateLabel(summary.ageSnapshot)}` : ""}`
+    : "未识别详细库龄报告";
+  document.querySelector("#age-bucket-grid").innerHTML = ageCoverage
+    ? ageBuckets.map((bucket) => `
+      <article class="age-bucket ${bucket.charged ? "charged" : "not-charged"}">
+        <div><b>${escapeHtml(bucket.bucket)} 天</b><span>${bucket.charged ? "计费区间" : "未计费"}</span></div>
+        <strong>${number(bucket.units)}<small> 件</small></strong>
+        <p>${number(bucket.skuCount)} 个 SKU</p>
+      </article>
+    `).join("")
+    : `<div class="age-empty">上传详细库龄报告后，这里会显示各收费区间的库存件数和 SKU 数。</div>`;
   document.querySelector("#liquidation-total").textContent = money(summary.liquidationNet);
   const fullBookPnl = summary.readiness.decisionSkuCount > 0
     && summary.readiness.bookPnl === summary.readiness.decisionSkuCount;

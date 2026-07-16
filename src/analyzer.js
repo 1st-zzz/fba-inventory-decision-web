@@ -19,6 +19,11 @@ const recognizedHeaders = new Set([
   "fulfillment-fee-per-unit", "fulfillment-fee-rate", "first-mile-cost-rate",
 ]);
 
+const DETAILED_AGE_BUCKETS = [
+  "0-180", "181-210", "211-240", "241-270", "271-300",
+  "301-330", "331-365", "366-455", "456+",
+];
+
 export function normalizeHeader(value) {
   return String(value ?? "")
     .trim()
@@ -361,6 +366,7 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
     if (item) {
       item.age = row.age;
       item.ageMode = "detailed";
+      item.ageSnapshot = row.snapshot || item.ageSnapshot || "";
       if (!item.asin) item.asin = row.asin;
       if (!item.product) item.product = row.product;
     }
@@ -457,6 +463,17 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
   const sum = (field) => analyzed.reduce((total, row) => total + (Number.isFinite(row[field]) ? row[field] : 0), 0);
   const countReady = (field) => analyzed.filter((row) => Number.isFinite(row[field])).length;
   const decisionRows = analyzed.filter((row) => row.excess > 0);
+  const detailedAgeRows = analyzed.filter((row) => row.ageMode === "detailed");
+  const ageBuckets = DETAILED_AGE_BUCKETS.map((bucket) => {
+    const rowsWithUnits = detailedAgeRows.filter((row) => valueOrZero(row.age?.[bucket]) > 0);
+    return {
+      bucket,
+      units: detailedAgeRows.reduce((total, row) => total + valueOrZero(row.age?.[bucket]), 0),
+      skuCount: rowsWithUnits.length,
+      charged: bucket !== "0-180" && Number(bucket.split("-")[0].replace("+", "")) >= rule.ageStart,
+    };
+  });
+  const ageSnapshot = detailedAgeRows.map((row) => row.ageSnapshot).find((value) => value) || "";
   const warnings = [];
   if (!byType.charge.length) warnings.push("未识别仓储收费报告：重量、体积、仓储费、清算处理费和移除费可能无法完整测算。");
   if (!byType.age.length) warnings.push("未识别详细库龄报告：UK/DE 的 241–270 天库存无法从合并区间中准确拆分。");
@@ -484,6 +501,8 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
       liquidationBookProfit: sum("liquidationBookProfit"),
       removalFee: sum("removalFee"),
       removalTotalLoss: sum("removalTotalLoss"),
+      ageBuckets,
+      ageSnapshot,
       riskCounts: {
         high: analyzed.filter((row) => row.risk === "高").length,
         medium: analyzed.filter((row) => row.risk === "中").length,
@@ -493,6 +512,7 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
         price: analyzed.filter((row) => row.price > 0).length,
         fee: countReady("removalFee"),
         age: analyzed.filter((row) => sumAge(row.age) > 0).length,
+        detailedAge: detailedAgeRows.length,
         productCost: countReady("productCost"),
         fulfillmentFee: countReady("fulfillmentFee"),
         firstMile: countReady("firstMileCost"),

@@ -141,5 +141,13 @@ test("public demo uses only synthetic identifiers", () => {
     assert.equal(result.rows.length, 8);
     assert.ok(result.rows.every((row) => row.sku.startsWith("DEMO-")));
     assert.equal(result.rule.marketplace, marketplace);
+    assert.equal(result.summary.ageBuckets.length, 9);
+    const bucketUnits = result.summary.ageBuckets.reduce((total, bucket) => total + bucket.units, 0);
+    assert.ok(Math.abs(bucketUnits - result.summary.available) < 1e-9);
   }
+  const us = createDemoAnalysis("US");
+  assert.equal(us.summary.ageBuckets.find((bucket) => bucket.bucket === "181-210").charged, true);
+  const uk = createDemoAnalysis("UK");
+  assert.equal(uk.summary.ageBuckets.find((bucket) => bucket.bucket === "181-210").charged, false);
+  assert.equal(uk.summary.ageBuckets.find((bucket) => bucket.bucket === "241-270").charged, true);
 });
