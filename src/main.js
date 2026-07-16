@@ -63,61 +63,34 @@ root.innerHTML = `
   </header>
 
   <main>
-    <section class="product-intro">
+    <section class="app-header">
       <div>
         <p class="eyebrow">FBA INVENTORY DECISION WORKSPACE</p>
-        <h1>先确认数据，再决定库存是留、清还是移</h1>
-        <p>面向运营人员的库存处置工作台：识别多份报告，预测继续持有成本，并把立即清算与移除成本放在同一页复核。</p>
+        <h1>FBA 库存处置决策</h1>
+        <p>上传运营报告，核对数据覆盖，判断计费库龄库存应继续持有还是立即清算。</p>
       </div>
-      <div class="workflow-steps" aria-label="工作流程">
-        <span><b>1</b>上传报告</span><i></i><span><b>2</b>核对覆盖</span><i></i><span><b>3</b>执行建议</span>
-      </div>
+      <div class="header-meta"><span>四国费率</span><span>本地处理</span><span>可审计导出</span></div>
     </section>
 
     <section class="intake-panel" id="setup">
       <div class="section-heading">
-        <div><p class="eyebrow">STEP 01 · INPUT</p><h2>数据与测算口径</h2></div>
+        <div><p class="eyebrow">STEP 01 · INPUT</p><h2>上传报告并设置口径</h2></div>
         <span class="local-badge">US / CA / UK / DE · XLSX / CSV</span>
       </div>
-      <div class="intake-grid">
-        <div class="settings-card">
-          <h3>先设定站点和日期</h3>
-          <div class="field-grid two">
-            <label>Amazon 站点
-              <select id="marketplace">
-                <option value="US">美国 · USD</option>
-                <option value="CA">加拿大 · CAD</option>
-                <option value="UK">英国 · GBP</option>
-                <option value="DE">德国 · EUR</option>
-              </select>
-            </label>
-            <label>测算起始日
-              <input id="analysis-date" type="date" value="${today}" />
-            </label>
-          </div>
-          <div class="cost-heading"><div><h3>统一预估成本</h3><p>按当前售价比例计算；成本表中的 SKU 金额或比例优先。</p></div><button id="template-button" class="link-button" type="button">下载成本模板</button></div>
-          <div class="field-grid three">
-            <label>采购成本（%）<input id="product-cost-rate" type="number" min="0" max="100" step="0.1" placeholder="例如 30" /></label>
-            <label>FBA配送费（%）<input id="fulfillment-fee-rate" type="number" min="0" max="100" step="0.1" placeholder="例如 18" /></label>
-            <label>头程（%）<input id="first-mile-rate" type="number" min="0" max="100" step="0.1" placeholder="例如 8" /></label>
-          </div>
-          <p class="field-note">采购成本和头程用于账面损益；未来现金推荐不会重复扣除已经发生的历史成本。</p>
-        </div>
-
-        <div class="upload-card">
-          <label class="dropzone" id="dropzone">
-            <input id="file-input" type="file" multiple accept=".xlsx,.xls,.xltx,.csv,.tsv" />
-            <span class="upload-icon">＋</span>
-            <strong>拖入或选择多个运营报告</strong>
-            <small>可分多次选择；建议包含库存、库龄、收费、佣金和商品报告</small>
-          </label>
+      <div class="control-strip">
+        <label>Amazon 站点<select id="marketplace"><option value="US">美国 · USD</option><option value="CA">加拿大 · CAD</option><option value="UK">英国 · GBP</option><option value="DE">德国 · EUR</option></select></label>
+        <label>测算起始日<input id="analysis-date" type="date" value="${today}" /></label>
+        <label>采购成本（%）<input id="product-cost-rate" type="number" min="0" max="100" step="0.1" placeholder="例如 30" /></label>
+        <label>FBA配送费（%）<input id="fulfillment-fee-rate" type="number" min="0" max="100" step="0.1" placeholder="例如 18" /></label>
+        <label>头程（%）<input id="first-mile-rate" type="number" min="0" max="100" step="0.1" placeholder="例如 8" /></label>
+        <button id="template-button" class="link-button" type="button">下载成本模板</button>
+      </div>
+      <div class="upload-layout">
+        <label class="dropzone" id="dropzone"><input id="file-input" type="file" multiple accept=".xlsx,.xls,.xltx,.csv,.tsv" /><span class="upload-icon">＋</span><span><strong>拖入或选择多个运营报告</strong><small>支持分多次选择；建议包含库存、库龄、收费、佣金和商品报告</small></span></label>
+        <div class="upload-side">
           <div id="selected-files" class="selected-files"></div>
-          <div class="upload-actions">
-            <button id="analyze-button" class="primary-button" disabled>开始本地分析</button>
-            <button id="clear-button" class="secondary-button" disabled>清空文件</button>
-            <button id="demo-button" class="secondary-button">查看脱敏演示</button>
-          </div>
-          <p class="privacy-note">页面不会将文件发送到 GitHub。刷新或关闭页面后，本次文件和结果会被清除。</p>
+          <div class="upload-actions"><button id="analyze-button" class="primary-button" disabled>开始本地分析</button><button id="clear-button" class="secondary-button" disabled>清空文件</button><button id="demo-button" class="secondary-button">查看脱敏演示</button></div>
+          <p class="privacy-note">文件只在当前浏览器处理。采购成本和头程仅用于账面损益，不会在未来现金推荐中重复扣除。</p>
         </div>
       </div>
     </section>
@@ -128,14 +101,10 @@ root.innerHTML = `
         <div class="result-actions"><span id="rule-version" class="rule-version"></span><button id="export-button" class="text-button">导出完整 CSV</button></div>
       </div>
       <div id="status-box"></div>
-      <div id="report-strip" class="report-strip"></div>
-
-      <section class="readiness-panel" aria-label="数据完整度与决策可信度">
+      <div class="result-overview-bar">
         <div class="readiness-summary"><span>决策可信度</span><strong id="confidence-level"></strong><small id="confidence-note"></small></div>
-        <div id="readiness-grid" class="readiness-grid"></div>
-      </section>
-
-      <div id="summary-grid" class="summary-grid"></div>
+        <details id="coverage-details" class="coverage-details"><summary>数据覆盖与已识别报告 <span>展开查看</span></summary><div id="readiness-grid" class="readiness-grid"></div><div id="report-strip" class="report-strip"></div></details>
+      </div>
 
       <section class="decision-panel">
         <div class="decision-panel-head">
@@ -145,26 +114,27 @@ root.innerHTML = `
         <div id="recommendation-banner" class="recommendation-banner"></div>
         <div id="scenario-grid" class="scenario-grid"></div>
 
-        <div class="sensitivity-panel">
-          <div class="subsection-head"><div><p class="eyebrow">SALES SENSITIVITY</p><h3>销量变化后，建议是否仍然成立</h3></div><p>以最近30日销量为基准，分别测算 −30%、基准和 +30%。</p></div>
-          <div id="sensitivity-grid" class="sensitivity-grid"></div>
-        </div>
-
-        <div class="forecast-panel">
-          <div class="subsection-head">
-            <div><p class="eyebrow">HOLDING COST FORECAST</p><h3>继续放置预计新增仓储费</h3></div>
-            <div class="forecast-meta"><b id="forecast-coverage"></b><div class="forecast-legend"><span class="base-dot"></span>基础仓储费 <span class="aged-dot"></span>库存龄附加费</div></div>
-          </div>
-          <div id="forecast-chart" class="forecast-chart"></div>
-          <div id="forecast-driver" class="forecast-driver"></div>
+        <div class="decision-support-grid">
+          <section class="support-panel sensitivity-panel">
+            <div class="subsection-head"><div><p class="eyebrow">SALES SENSITIVITY</p><h3>销量变化后建议是否成立</h3></div><p>最近30日销量 ±30%</p></div>
+            <div id="sensitivity-grid" class="sensitivity-grid"></div>
+          </section>
+          <section class="support-panel forecast-panel">
+            <div class="subsection-head"><div><p class="eyebrow">HOLDING COST</p><h3>继续放置新增仓储费</h3></div><b id="forecast-coverage"></b></div>
+            <div id="forecast-chart" class="forecast-chart"></div>
+            <div class="forecast-legend"><span class="base-dot"></span>基础仓储费 <span class="aged-dot"></span>库存龄附加费</div>
+            <div id="forecast-driver" class="forecast-driver"></div>
+          </section>
         </div>
       </section>
 
-      <section class="age-panel">
-        <div class="age-panel-head"><div><p class="eyebrow">AGED INVENTORY BUCKETS</p><h2>库龄收费区间库存</h2></div><p id="age-coverage"></p></div>
-        <div id="age-bucket-grid" class="age-bucket-grid"></div>
-        <p class="age-note">库龄来自最新快照；区间预测按区间下限推进。与当前可售库存存在差异时，会在可信度区域提示。</p>
-      </section>
+      <div class="secondary-metrics-head"><p class="eyebrow">SUPPORTING METRICS</p><h2>补充监控指标</h2></div>
+      <div id="summary-grid" class="summary-grid"></div>
+
+      <details class="age-panel">
+        <summary><div><p class="eyebrow">AGED INVENTORY BUCKETS</p><h2>库龄收费区间库存</h2></div><p id="age-coverage"></p></summary>
+        <div class="age-panel-body"><div id="age-bucket-grid" class="age-bucket-grid"></div><p class="age-note">库龄来自最新快照；区间预测按区间下限推进。与当前可售库存存在差异时，会在可信度区域提示。</p></div>
+      </details>
 
       <section class="table-panel" id="sku-list">
         <div class="table-head">
@@ -183,10 +153,7 @@ root.innerHTML = `
         <p id="table-count" class="table-count"></p>
       </section>
 
-      <section class="method-panel">
-        <div><p class="eyebrow">RULES & ASSUMPTIONS</p><h2>规则、口径与执行边界</h2><p>推荐比较的是未来现金：正常销售净回款 + 期末清算回收 − 新增仓储费。移除因缺少回收价值与下游成本，只展示费用，不参与推荐。</p><a id="rule-source" target="_blank" rel="noreferrer">查看 Amazon 费率来源</a></div>
-        <ul id="warning-list"></ul>
-      </section>
+      <details class="method-panel"><summary><span>规则、口径与执行边界</span><small>展开查看计算假设与费率来源</small></summary><div class="method-body"><div><p>推荐比较的是未来现金：正常销售净回款 + 期末清算回收 − 新增仓储费。移除因缺少回收价值与下游成本，只展示费用，不参与推荐。</p><a id="rule-source" target="_blank" rel="noreferrer">查看 Amazon 费率来源</a></div><ul id="warning-list"></ul></div></details>
     </section>
   </main>
 
@@ -315,6 +282,9 @@ function renderReadiness(summary, forecast) {
   confidenceElement.textContent = confidence.level;
   confidenceElement.className = `confidence-${confidence.tone}`;
   document.querySelector("#confidence-note").textContent = confidence.note;
+  const coverageDetails = document.querySelector("#coverage-details");
+  coverageDetails.open = confidence.tone === "low";
+  coverageDetails.querySelector("summary span").textContent = confidence.tone === "high" ? "关键数据完整" : "展开检查缺口";
 }
 
 function render() {
