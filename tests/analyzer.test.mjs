@@ -190,9 +190,32 @@ test("forecasts cumulative holding cost and remaining charged inventory", () => 
   assert.equal(result.summary.forecasts.length, 4);
 });
 
-test("CSV export includes auditable 90-day forecast fields", () => {
+test("CSV export includes auditable forecasts for every decision horizon", () => {
   const result = createDemoAnalysis("US");
   const csv = exportRowsToCsv(result.rows, result.rule.currency);
+  assert.match(csv, /Hold30TotalHoldingCost_USD/);
   assert.match(csv, /Hold90TotalHoldingCost_USD/);
+  assert.match(csv, /Hold180TotalHoldingCost_USD/);
   assert.match(csv, /Hold90Recommendation/);
+  assert.match(csv, /BreakEvenDays/);
+});
+
+test("removal stays outside recommendations when recovery is unknown", () => {
+  const result = createDemoAnalysis("US");
+  for (const row of result.rows) {
+    assert.notEqual(row.forecasts.find((forecast) => forecast.horizonDays === 90).recommendation.key, "remove");
+  }
+  assert.notEqual(result.summary.forecasts.find((forecast) => forecast.horizonDays === 90).recommendation.key, "remove");
+});
+
+test("forecast includes three sales sensitivity scenarios", () => {
+  const result = createDemoAnalysis("US");
+  const forecast = result.summary.forecasts.find((item) => item.horizonDays === 90);
+  assert.deepEqual(forecast.sensitivity.map((item) => item.multiplier), [0.7, 1, 1.3]);
+  assert.ok(forecast.sensitivity.every((item) => Number.isFinite(item.totalHoldingCost)));
+  assert.equal(result.summary.decisionBreakEvenDays, 31);
+});
+
+test("rejects analysis dates before the selected fee version", () => {
+  assert.throws(() => createDemoAnalysis("UK", { analysisDate: "2026-06-30", month: 6 }), /费率从 2026-07-01 起生效/);
 });

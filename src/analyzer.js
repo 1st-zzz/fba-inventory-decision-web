@@ -25,6 +25,11 @@ const DETAILED_AGE_BUCKETS = [
 ];
 
 export const FORECAST_HORIZONS = [30, 60, 90, 180];
+export const SALES_SCENARIOS = [
+  { key: "conservative", label: "保守", multiplier: 0.7 },
+  { key: "baseline", label: "基准", multiplier: 1 },
+  { key: "optimistic", label: "乐观", multiplier: 1.3 },
+];
 
 export function normalizeHeader(value) {
   return String(value ?? "")
@@ -329,9 +334,9 @@ function actionCohorts(item, rule) {
     .sort((a, b) => b.ageDays - a.ageDays);
 }
 
-function cohortsAfterSales(item, rule, elapsedDays) {
+function cohortsAfterSales(item, rule, elapsedDays, salesMultiplier = 1) {
   const cohorts = actionCohorts(item, rule).map((cohort) => ({ ...cohort }));
-  let sold = Math.min(item.actionUnits, item.sales30 / 30 * elapsedDays);
+  let sold = Math.min(item.actionUnits, item.sales30 * salesMultiplier / 30 * elapsedDays);
   for (const cohort of cohorts) {
     const deducted = Math.min(cohort.units, sold);
     cohort.units -= deducted;
@@ -353,17 +358,16 @@ function baseStoragePerUnit(item, rule, currentMonth, targetMonth) {
   return item.volume * rule.storage[sizeTier][targetSeason];
 }
 
-function recommendScenario(holdValue, liquidateValue, removeCashValue, horizonDays) {
+function recommendScenario(holdValue, liquidateValue, horizonDays) {
   const scenarios = [
     { key: "hold", value: holdValue, label: `继续销售 ${horizonDays} 天，再清算剩余` },
     { key: "liquidate", value: liquidateValue, label: "立即清算" },
-    { key: "remove", value: removeCashValue, label: "立即移除" },
   ].filter((scenario) => Number.isFinite(scenario.value));
-  if (scenarios.length < 3) return { key: "pending", label: "补全费用后再比较", value: null };
+  if (scenarios.length < 2) return { key: "pending", label: "补全费用后再比较", value: null };
   return scenarios.reduce((best, scenario) => scenario.value > best.value ? scenario : best);
 }
 
-function forecastHolding(item, rule, horizonDays, currentMonth) {
+function forecastHolding(item, rule, horizonDays, currentMonth, salesMultiplier = 1) {
   if (item.actionUnits <= 0) {
     return {
       horizonDays, expectedSoldUnits: 0, remainingUnits: 0,
@@ -374,7 +378,7 @@ function forecastHolding(item, rule, horizonDays, currentMonth) {
   }
 
   const periodCount = Math.ceil(horizonDays / 30);
-  const dailySales = item.sales30 / 30;
+  const dailySales = item.sales30 * salesMultiplier / 30;
   let baseStorageCost = 0;
   let agedSurchargeCost = 0;
   let baseReady = true;
@@ -391,7 +395,7 @@ function forecastHolding(item, rule, horizonDays, currentMonth) {
     if (Number.isFinite(basePerUnit)) baseStorageCost += averageUnits * basePerUnit * periodDays / 30;
     else baseReady = false;
 
-    const cohorts = cohortsAfterSales(item, rule, endDay);
+    const cohorts = cohortsAfterSales(item, rule, endDay, salesMultiplier);
     if (cohorts.length) {
       for (const cohort of cohorts) {
         const fee = agedFeePerUnitAtAge(item, rule, cohort.ageDays + endDay);
@@ -420,9 +424,9 @@ function forecastHolding(item, rule, horizonDays, currentMonth) {
     && Number.isFinite(totalHoldingCost)
     ? normalSaleCash + exitLiquidationNet - totalHoldingCost
     : null;
-  const removeCashValue = Number.isFinite(item.removalFee) ? -item.removalFee : null;
   return {
     horizonDays,
+    salesMultiplier,
     expectedSoldUnits,
     remainingUnits,
     baseStorageCost: baseReady ? baseStorageCost : null,
@@ -431,8 +435,31 @@ function forecastHolding(item, rule, horizonDays, currentMonth) {
     normalSaleCash,
     exitLiquidationNet,
     holdThenLiquidateValue,
-    recommendation: recommendScenario(holdThenLiquidateValue, item.liquidationNet, removeCashValue, horizonDays),
+    recommendation: recommendScenario(holdThenLiquidateValue, item.liquidationNet, horizonDays),
   };
+}
+
+function breakEvenDays(item, rule, currentMonth, limitDays = 365) {
+  if (item.actionUnits <= 0 || !Number.isFinite(item.liquidationNet)) return null;
+  for (let horizonDays = 1; horizonDays <= limitDays; horizonDays += 1) {
+    const forecast = forecastHolding(item, rule, horizonDays, currentMonth);
+    if (Number.isFinite(forecast.holdThenLiquidateValue)
+      && forecast.holdThenLiquidateValue <= item.liquidationNet) return horizonDays;
+  }
+  return null;
+}
+
+function portfolioBreakEvenDays(rows, rule, currentMonth, limitDays = 365) {
+  const actionRows = rows.filter((row) => row.actionUnits > 0);
+  if (!actionRows.length || actionRows.some((row) => !Number.isFinite(row.liquidationNet))) return null;
+  const liquidationValue = actionRows.reduce((total, row) => total + row.liquidationNet, 0);
+  for (let horizonDays = 1; horizonDays <= limitDays; horizonDays += 1) {
+    const forecasts = actionRows.map((row) => forecastHolding(row, rule, horizonDays, currentMonth));
+    if (forecasts.some((forecast) => !Number.isFinite(forecast.holdThenLiquidateValue))) return null;
+    const holdValue = forecasts.reduce((total, forecast) => total + forecast.holdThenLiquidateValue, 0);
+    if (holdValue <= liquidationValue) return horizonDays;
+  }
+  return null;
 }
 
 function calculateRisk(item, rule) {
@@ -466,6 +493,10 @@ function mergeMissing(target, source) {
 export function analyzeSources(parsedSources, marketplace = "US", options = {}) {
   const rule = MARKET_RULES[marketplace];
   if (!rule) throw new Error(`Unsupported marketplace: ${marketplace}`);
+  const analysisDate = String(options.analysisDate || new Date().toISOString().slice(0, 10));
+  if (analysisDate < rule.effectiveFrom) {
+    throw new Error(`${marketplace} 费率从 ${rule.effectiveFrom} 起生效，不能用于 ${analysisDate} 的测算。`);
+  }
   const byType = { inventory: [], age: [], charge: [], commission: [], products: [], costs: [] };
   for (const source of parsedSources) {
     if (byType[source.type]) byType[source.type].push(...source.rows);
@@ -521,7 +552,8 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
     item.chargeMonth = row.chargeMonth || item.chargeMonth;
   }
 
-  const month = options.month ?? new Date().getMonth() + 1;
+  const parsedAnalysisDate = new Date(`${analysisDate}T00:00:00`);
+  const month = options.month ?? (Number.isFinite(parsedAnalysisDate.getTime()) ? parsedAnalysisDate.getMonth() + 1 : new Date().getMonth() + 1);
   const defaultProductCostRate = rateOrNull(options.defaultProductCostRate);
   const defaultFulfillmentFeeRate = rateOrNull(options.defaultFulfillmentFeeRate);
   const defaultFirstMileRate = rateOrNull(options.defaultFirstMileRate);
@@ -595,6 +627,7 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
       : null;
     Object.assign(normalized, calculateRisk(normalized, rule));
     normalized.forecasts = FORECAST_HORIZONS.map((horizonDays) => forecastHolding(normalized, rule, horizonDays, month));
+    normalized.breakEvenDays = breakEvenDays(normalized, rule, month);
     return normalized;
   });
 
@@ -602,6 +635,7 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
   const sum = (field) => analyzed.reduce((total, row) => total + (Number.isFinite(row[field]) ? row[field] : 0), 0);
   const countReady = (field) => analyzed.filter((row) => Number.isFinite(row[field])).length;
   const actionRows = analyzed.filter((row) => row.actionUnits > 0);
+  const decisionBreakEvenDays = portfolioBreakEvenDays(analyzed, rule, month);
   const detailedAgeRows = analyzed.filter((row) => row.ageMode === "detailed");
   const ageBuckets = DETAILED_AGE_BUCKETS.map((bucket) => {
     const rowsWithUnits = detailedAgeRows.filter((row) => valueOrZero(row.age?.[bucket]) > 0);
@@ -623,8 +657,22 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
     const holdThenLiquidateValue = sumForecast("holdThenLiquidateValue");
     const complete = actionRows.length > 0 && countForecastReady("holdThenLiquidateValue") === actionRows.length;
     const recommendation = complete
-      ? recommendScenario(holdThenLiquidateValue, sum("liquidationNet"), -sum("removalFee"), horizonDays)
+      ? recommendScenario(holdThenLiquidateValue, sum("liquidationNet"), horizonDays)
       : { key: "pending", label: actionRows.length ? "补全费用后再比较" : "无需处理", value: null };
+    const sensitivity = SALES_SCENARIOS.map((scenario) => {
+      const scenarioForecasts = actionRows.map((row) => forecastHolding(row, rule, horizonDays, month, scenario.multiplier));
+      const scenarioReady = scenarioForecasts.filter((item) => Number.isFinite(item.holdThenLiquidateValue)).length;
+      const scenarioHoldValue = scenarioForecasts.reduce((total, item) => total + (Number.isFinite(item.holdThenLiquidateValue) ? item.holdThenLiquidateValue : 0), 0);
+      const scenarioHoldingCost = scenarioForecasts.reduce((total, item) => total + (Number.isFinite(item.totalHoldingCost) ? item.totalHoldingCost : 0), 0);
+      return {
+        ...scenario,
+        totalHoldingCost: scenarioHoldingCost,
+        holdThenLiquidateValue: scenarioReady === actionRows.length && actionRows.length > 0 ? scenarioHoldValue : null,
+        recommendation: scenarioReady === actionRows.length && actionRows.length > 0
+          ? recommendScenario(scenarioHoldValue, sum("liquidationNet"), horizonDays)
+          : { key: "pending", label: actionRows.length ? "补全费用后再比较" : "无需处理", value: null },
+      };
+    });
     return {
       horizonDays,
       expectedSoldUnits: sumForecast("expectedSoldUnits"),
@@ -634,6 +682,7 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
       totalHoldingCost,
       holdThenLiquidateValue: complete ? holdThenLiquidateValue : null,
       recommendation,
+      sensitivity,
       readiness: {
         actionSkuCount: actionRows.length,
         storage: countForecastReady("totalHoldingCost"),
@@ -650,12 +699,14 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
   if (!analyzed.some((row) => Number.isFinite(row.firstMileCost))) warnings.push("未提供头程占售价比例或单件头程：完整利润暂不扣除头程。");
   warnings.push("清算和移除费用仅按进入长期仓储计费区间的库存测算，不按预计冗余库存测算。");
   warnings.push("继续持有预测仅覆盖当前已进入长期仓储计费区间的库存；按当前 30 天销量线性延续、最老库存优先售出，并按月累计基础仓储费与库存龄附加费。");
+  warnings.push("库龄区间预测按各区间下限推进，属于偏保守的收费时点估算；执行前应以 Seller Central 费率预览为准。");
   if (actionRows.some((row) => row.forecasts.some((forecast) => !Number.isFinite(forecast.totalHoldingCost)))) warnings.push("部分计费 SKU 缺少体积或仓储收费数据，继续持有费用为已覆盖部分，不能视为完整预算。");
   warnings.push("未填写移除后回收价值和下游处理成本：移除总损失包含采购成本、头程和 Amazon 移除费，但不参与最终收益比较。");
 
   return {
     marketplace,
     rule,
+    analysisDate,
     rows: analyzed,
     reports: parsedSources.map(({ fileName, sheetName, type, label, rows }) => ({ fileName, sheetName, type, label, rowCount: rows.length })),
     warnings,
@@ -666,6 +717,7 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
       excess: sum("excess"),
       aged: sum("aged"),
       actionUnits: sum("actionUnits"),
+      cappedActionUnits: analyzed.reduce((total, row) => total + Math.min(row.actionUnits, row.available), 0),
       storage: sum("storageEstimate"),
       agedFee: sum("agedFee"),
       liquidationNet: sum("liquidationNet"),
@@ -673,6 +725,7 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
       removalFee: sum("removalFee"),
       removalTotalLoss: sum("removalTotalLoss"),
       forecasts,
+      decisionBreakEvenDays,
       ageBuckets,
       ageSnapshot,
       riskCounts: {
@@ -697,7 +750,7 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
   };
 }
 
-export function createDemoAnalysis(marketplace = "US") {
+export function createDemoAnalysis(marketplace = "US", options = {}) {
   const inventory = [
     ["DEMO-001", "B0DEMO0001", "手工编织工具套装", 180, 0, 0, 180, 24.99],
     ["DEMO-002", "B0DEMO0002", "派对装饰组合", 96, 3, 87, 60, 16.99],
@@ -730,21 +783,36 @@ export function createDemoAnalysis(marketplace = "US") {
     { fileName: "脱敏演示库存.xlsx", sheetName: "Demo", type: "inventory", label: REPORT_LABELS.inventory, rows: inventory },
     { fileName: "脱敏演示收费.xlsx", sheetName: "Demo", type: "charge", label: REPORT_LABELS.charge, rows: charge },
     { fileName: "脱敏演示成本.xlsx", sheetName: "Demo", type: "costs", label: REPORT_LABELS.costs, rows: costs },
-  ], marketplace, { month: 7 });
+  ], marketplace, {
+    month: options.month ?? 7,
+    analysisDate: options.analysisDate ?? "2026-07-16",
+  });
 }
 
 export function exportRowsToCsv(rows, currency) {
-  const headers = ["SKU", "ASIN", "Product", "Risk", "Action", "Available", "Sales30", "DaysSupply", "AgedUnits", "ActionUnits_AgedOnly", "ExcessUnits", `SalePrice_${currency}`, "ProductCostRate", `ProductCost_${currency}`, "FBAFulfillmentFeeRate", `FBAFulfillmentFee_${currency}`, "FirstMileRate", `FirstMileCost_${currency}`, `NormalSaleNetPerUnit_${currency}`, `NormalSaleFullProfitPerUnit_${currency}`, `Storage_${currency}`, `AgedFee_${currency}`, `LiquidationNet_${currency}`, `LiquidationBookProfit_${currency}`, `AmazonRemovalFee_${currency}`, `RemovalTotalLoss_${currency}`, "Hold90ExpectedSoldUnits", "Hold90RemainingUnits", `Hold90BaseStorage_${currency}`, `Hold90AgedSurcharge_${currency}`, `Hold90TotalHoldingCost_${currency}`, `Hold90ThenLiquidateValue_${currency}`, "Hold90Recommendation"];
+  const forecastHeaders = FORECAST_HORIZONS.flatMap((horizonDays) => [
+    `Hold${horizonDays}ExpectedSoldUnits`, `Hold${horizonDays}RemainingUnits`,
+    `Hold${horizonDays}BaseStorage_${currency}`, `Hold${horizonDays}AgedSurcharge_${currency}`,
+    `Hold${horizonDays}TotalHoldingCost_${currency}`, `Hold${horizonDays}ThenLiquidateValue_${currency}`,
+    `Hold${horizonDays}Recommendation`,
+  ]);
+  const headers = ["SKU", "ASIN", "Product", "Risk", "Action", "Available", "Sales30", "DaysSupply", "AgedUnits", "ActionUnits_AgedOnly", "ExcessUnits", `SalePrice_${currency}`, "ProductCostRate", `ProductCost_${currency}`, "FBAFulfillmentFeeRate", `FBAFulfillmentFee_${currency}`, "FirstMileRate", `FirstMileCost_${currency}`, `NormalSaleNetPerUnit_${currency}`, `NormalSaleFullProfitPerUnit_${currency}`, `Storage_${currency}`, `AgedFee_${currency}`, `LiquidationNet_${currency}`, `LiquidationBookProfit_${currency}`, `AmazonRemovalFee_${currency}`, `RemovalTotalLoss_${currency}`, "BreakEvenDays", ...forecastHeaders];
   const escape = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
   const lines = rows.map((row) => {
-    const hold90 = row.forecasts.find((forecast) => forecast.horizonDays === 90);
+    const forecastValues = FORECAST_HORIZONS.flatMap((horizonDays) => {
+      const forecast = row.forecasts.find((item) => item.horizonDays === horizonDays);
+      return [
+        forecast.expectedSoldUnits, forecast.remainingUnits, forecast.baseStorageCost,
+        forecast.agedSurchargeCost, forecast.totalHoldingCost, forecast.holdThenLiquidateValue,
+        forecast.recommendation.label,
+      ];
+    });
     return [row.sku, row.asin, row.product, row.risk, row.action, row.available, row.sales30,
     row.daysSupply, row.aged, row.actionUnits, row.excess, row.price, row.productCostRate, row.productCost,
     row.fulfillmentFeeRate, row.fulfillmentFee, row.firstMileRate, row.firstMileCost,
     row.normalSaleNetPerUnit, row.normalSaleFullProfitPerUnit,
     row.storageEstimate, row.agedFee, row.liquidationNet, row.liquidationBookProfit, row.removalFee, row.removalTotalLoss,
-    hold90.expectedSoldUnits, hold90.remainingUnits, hold90.baseStorageCost, hold90.agedSurchargeCost,
-    hold90.totalHoldingCost, hold90.holdThenLiquidateValue, hold90.recommendation.label,
+    row.breakEvenDays, ...forecastValues,
   ].map(escape).join(",");
   });
   return ["\ufeff" + headers.join(","), ...lines].join("\r\n");
