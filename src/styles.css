@@ -146,7 +146,7 @@ button, select, label { -webkit-tap-highlight-color: transparent; }
 .filters input, .filters select { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fbfcfb; color: var(--ink); }
 .filters input { min-width: 250px; }
 .table-scroll { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; min-width: 2100px; }
+table { width: 100%; border-collapse: collapse; min-width: 2200px; }
 th { padding: 11px 14px; text-align: left; white-space: nowrap; background: #edf3f1; color: #617574; font-size: 10px; letter-spacing: .04em; }
 td { padding: 13px 14px; border-top: 1px solid #edf1ef; white-space: nowrap; font-size: 12px; }
 td:first-child { min-width: 260px; max-width: 320px; }

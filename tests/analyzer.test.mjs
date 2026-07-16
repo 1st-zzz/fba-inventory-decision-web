@@ -20,8 +20,8 @@ test("detects the six supported report types", () => {
 test("parses and merges synthetic reports without server state", () => {
   const workbook = XLSX.utils.book_new();
   const inventory = XLSX.utils.aoa_to_sheet([
-    ["snapshot-date", "sku", "fnsku", "asin", "product-name", "available", "fc-transfer", "units-shipped-t30", "estimated-excess-quantity", "your-price"],
-    ["2026-07-14", "DEMO-TEST-001", "X00DEMO001", "B0DEMO0001", "Demo Product", 100, 5, 10, 70, 20],
+    ["snapshot-date", "sku", "fnsku", "asin", "product-name", "available", "fc-transfer", "units-shipped-t30", "estimated-excess-quantity", "your-price", "inv-age-181-to-270-days"],
+    ["2026-07-14", "DEMO-TEST-001", "X00DEMO001", "B0DEMO0001", "Demo Product", 100, 5, 10, 70, 20, 70],
   ]);
   XLSX.utils.book_append_sheet(workbook, inventory, "Inventory");
   const parsed = workbookToSources(workbook, "demo-inventory.xlsx", XLSX, "US");
@@ -40,6 +40,7 @@ test("parses and merges synthetic reports without server state", () => {
   ], "US", { month: 7 });
   assert.equal(result.summary.skuCount, 1);
   assert.equal(result.summary.excess, 70);
+  assert.equal(result.summary.actionUnits, 70);
   assert.equal(result.summary.storage, 12.5);
   assert.ok(Math.abs(result.rows[0].removalFee - 107.1) < 1e-9);
   assert.equal(result.rows[0].liquidationNet, 68.25);
@@ -57,20 +58,22 @@ test("liquidation headline excludes product and first-mile costs", () => {
       product: "Demo Cost Product",
       available: 10,
       sales30: 0,
-      excess: 10,
+      excess: 4,
       price: 100,
       productCost: 30,
       firstMileCost: 5,
       referralFee: 15,
       fulfillmentFee: 10,
       ageMode: "detailed",
-      age: {},
+      age: { "181-210": 10 },
       weight: 0.4,
       sizeTier: "standard",
     }],
   }], "US");
   const row = result.rows[0];
   assert.equal(row.liquidationNet, 61.25);
+  assert.equal(row.actionUnits, 10);
+  assert.equal(row.excess, 4);
   assert.equal(row.knownProductCost, 300);
   assert.equal(row.knownFirstMileCost, 50);
   assert.equal(row.normalSaleNetPerUnit, 75);
@@ -96,7 +99,7 @@ test("uses global sale-price percentages for all three estimated costs", () => {
       weight: 0.4,
       sizeTier: "standard",
       ageMode: "detailed",
-      age: {},
+      age: { "181-210": 2 },
     }],
   }], "US", { defaultProductCostRate: 30, defaultFulfillmentFeeRate: 18, defaultFirstMileRate: 8 });
   const row = result.rows[0];
@@ -126,7 +129,7 @@ test("parses a cost supplement and merges it by seller SKU", () => {
     sheetName: "Inventory",
     type: "inventory",
     label: "库存报告",
-    rows: [{ sku: "DEMO-COST-002", available: 10, sales30: 2, excess: 4, price: 20, referralFee: 3, weight: 0.5, sizeTier: "standard", ageMode: "detailed", age: {} }],
+    rows: [{ sku: "DEMO-COST-002", available: 10, sales30: 2, excess: 4, price: 20, referralFee: 3, weight: 0.5, sizeTier: "standard", ageMode: "detailed", age: { "181-210": 3 } }],
   }, ...parsed], "US");
   const row = result.rows[0];
   assert.equal(row.productCost, 6);

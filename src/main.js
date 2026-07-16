@@ -127,12 +127,12 @@ root.innerHTML = `
       <article class="decision-card liquidate">
         <span>清算预计净回收</span><h3 id="liquidation-total"></h3>
         <div class="decision-sub"><span>扣采购成本与头程后的账面损益</span><b id="liquidation-book-pnl"></b></div>
-        <p>净回收用于判断今天可收回多少现金；账面损益用于复盘历史成本，两者分开显示。</p>
+        <p>仅按进入长期仓储计费区间的库存测算；净回收与扣历史成本后的账面损益分开显示。</p>
       </article>
       <article class="decision-card remove">
         <span>移除预计总损失</span><h3 id="removal-total-loss"></h3>
         <div class="decision-sub"><span>其中 Amazon 移除费</span><b id="removal-total"></b></div>
-        <p>总损失以负数表示：−（采购成本 + 头程 + Amazon移除费）；不含移除后的回收价值及下游处理成本。</p>
+        <p>仅按计费库龄库存测算；总损失以负数表示：−（采购成本 + 头程 + Amazon移除费）。</p>
       </article>
     </section>
 
@@ -150,7 +150,7 @@ root.innerHTML = `
         <table>
           <thead><tr>
             <th>SKU / 商品</th><th>风险</th><th>可售</th><th>30日销量</th><th>可售天数</th>
-            <th>计费库龄</th><th>冗余</th><th>仓储费</th><th>长期仓储费</th>
+            <th>计费库龄</th><th>处置测算数</th><th>冗余</th><th>仓储费</th><th>长期仓储费</th>
             <th>采购成本/件</th><th>FBA配送费/件</th><th>头程/件</th><th>正常销售完整利润/件</th>
             <th>清算预计净回收</th><th>清算账面损益</th><th>Amazon移除费</th><th>移除总损失</th><th>建议动作</th>
           </tr></thead>
@@ -270,24 +270,24 @@ function render() {
     `).join("")
     : `<div class="age-empty">上传详细库龄报告后，这里会显示各收费区间的库存件数和 SKU 数。</div>`;
   document.querySelector("#liquidation-total").textContent = money(summary.liquidationNet);
-  const fullBookPnl = summary.readiness.decisionSkuCount > 0
-    && summary.readiness.bookPnl === summary.readiness.decisionSkuCount;
-  document.querySelector("#liquidation-book-pnl").textContent = summary.readiness.decisionSkuCount === 0
-    ? "无冗余库存"
+  const fullBookPnl = summary.readiness.actionSkuCount > 0
+    && summary.readiness.bookPnl === summary.readiness.actionSkuCount;
+  document.querySelector("#liquidation-book-pnl").textContent = summary.readiness.actionSkuCount === 0
+    ? "无计费库龄库存"
     : fullBookPnl
       ? money(summary.liquidationBookProfit)
-      : `待补 ${number(summary.readiness.decisionSkuCount - summary.readiness.bookPnl)} 个冗余 SKU`;
+      : `待补 ${number(summary.readiness.actionSkuCount - summary.readiness.bookPnl)} 个计费 SKU`;
   document.querySelector("#sale-profit-status").textContent = summary.readiness.saleProfit === summary.skuCount
     ? `已覆盖 ${number(summary.skuCount)} 个 SKU`
     : `可计算 ${number(summary.readiness.saleProfit)}/${number(summary.skuCount)} 个 SKU`;
   document.querySelector("#removal-total").textContent = money(summary.removalFee);
-  const fullRemovalLoss = summary.readiness.decisionSkuCount > 0
-    && summary.readiness.removalLoss === summary.readiness.decisionSkuCount;
-  document.querySelector("#removal-total-loss").textContent = summary.readiness.decisionSkuCount === 0
-    ? "无冗余库存"
+  const fullRemovalLoss = summary.readiness.actionSkuCount > 0
+    && summary.readiness.removalLoss === summary.readiness.actionSkuCount;
+  document.querySelector("#removal-total-loss").textContent = summary.readiness.actionSkuCount === 0
+    ? "无计费库龄库存"
     : fullRemovalLoss
       ? money(summary.removalTotalLoss)
-      : `待补 ${number(summary.readiness.decisionSkuCount - summary.readiness.removalLoss)} 个冗余 SKU`;
+      : `待补 ${number(summary.readiness.actionSkuCount - summary.readiness.removalLoss)} 个计费 SKU`;
 
   const reports = current.reports.filter((report) => report.type !== "unknown");
   document.querySelector("#report-strip").innerHTML = reports.length
@@ -303,6 +303,7 @@ function render() {
       <td>${number(row.sales30)}</td>
       <td>${row.daysSupply >= 999 ? "无销量" : number(row.daysSupply)}</td>
       <td>${number(row.aged)}</td>
+      <td>${number(row.actionUnits)}</td>
       <td>${number(row.excess)}</td>
       <td>${moneyOrPending(row.storageEstimate)}</td>
       <td>${moneyOrPending(row.agedFee)}</td>

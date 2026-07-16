@@ -423,18 +423,19 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
         ? normalized.price * normalized.firstMileRate
         : null;
     normalized.aged = agedUnits(normalized, rule);
+    normalized.actionUnits = normalized.aged;
     normalized.storageEstimate = monthlyStorage(normalized, rule, month);
     normalized.agedFee = ageFee(normalized, rule);
     normalized.removalFeeUnit = feeFromTier(rule.removal[normalized.sizeTier], normalized.weight, rule.incrementRounding);
     normalized.processingFeeUnit = feeFromTier(rule.processing[normalized.sizeTier], normalized.weight, rule.incrementRounding);
-    normalized.liquidationGross = normalized.price * excess * LIQUIDATION.grossRecoveryRate;
+    normalized.liquidationGross = normalized.price * normalized.actionUnits * LIQUIDATION.grossRecoveryRate;
     normalized.liquidationReferral = normalized.liquidationGross * LIQUIDATION.referralFeeRate;
     normalized.liquidationNet = normalized.processingFeeUnit === null
       ? null
-      : normalized.liquidationGross - normalized.liquidationReferral - normalized.processingFeeUnit * excess;
-    normalized.removalFee = normalized.removalFeeUnit === null ? null : normalized.removalFeeUnit * excess;
-    normalized.knownProductCost = Number.isFinite(normalized.productCost) ? normalized.productCost * excess : null;
-    normalized.knownFirstMileCost = Number.isFinite(normalized.firstMileCost) ? normalized.firstMileCost * excess : null;
+      : normalized.liquidationGross - normalized.liquidationReferral - normalized.processingFeeUnit * normalized.actionUnits;
+    normalized.removalFee = normalized.removalFeeUnit === null ? null : normalized.removalFeeUnit * normalized.actionUnits;
+    normalized.knownProductCost = Number.isFinite(normalized.productCost) ? normalized.productCost * normalized.actionUnits : null;
+    normalized.knownFirstMileCost = Number.isFinite(normalized.firstMileCost) ? normalized.firstMileCost * normalized.actionUnits : null;
     normalized.removalTotalLoss = Number.isFinite(normalized.removalFee)
       && Number.isFinite(normalized.knownProductCost)
       && Number.isFinite(normalized.knownFirstMileCost)
@@ -462,7 +463,7 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
   analyzed.sort((a, b) => b.score - a.score || b.excess - a.excess);
   const sum = (field) => analyzed.reduce((total, row) => total + (Number.isFinite(row[field]) ? row[field] : 0), 0);
   const countReady = (field) => analyzed.filter((row) => Number.isFinite(row[field])).length;
-  const decisionRows = analyzed.filter((row) => row.excess > 0);
+  const actionRows = analyzed.filter((row) => row.actionUnits > 0);
   const detailedAgeRows = analyzed.filter((row) => row.ageMode === "detailed");
   const ageBuckets = DETAILED_AGE_BUCKETS.map((bucket) => {
     const rowsWithUnits = detailedAgeRows.filter((row) => valueOrZero(row.age?.[bucket]) > 0);
@@ -481,6 +482,7 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
   if (!analyzed.some((row) => Number.isFinite(row.productCost))) warnings.push("未提供采购成本占售价比例或单件金额：清算预计净回收不能换算为账面损益。");
   if (!analyzed.some((row) => Number.isFinite(row.fulfillmentFee))) warnings.push("未提供 FBA 配送费占售价比例或单件金额：不能计算正常销售单件净回款和完整利润。");
   if (!analyzed.some((row) => Number.isFinite(row.firstMileCost))) warnings.push("未提供头程占售价比例或单件头程：完整利润暂不扣除头程。");
+  warnings.push("清算和移除费用仅按进入长期仓储计费区间的库存测算，不按预计冗余库存测算。");
   warnings.push("未填写移除后回收价值和下游处理成本：移除总损失包含采购成本、头程和 Amazon 移除费，但不参与最终收益比较。");
 
   return {
@@ -495,6 +497,7 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
       transfer: sum("transfer"),
       excess: sum("excess"),
       aged: sum("aged"),
+      actionUnits: sum("actionUnits"),
       storage: sum("storageEstimate"),
       agedFee: sum("agedFee"),
       liquidationNet: sum("liquidationNet"),
@@ -517,9 +520,9 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
         fulfillmentFee: countReady("fulfillmentFee"),
         firstMile: countReady("firstMileCost"),
         saleProfit: countReady("normalSaleFullProfitPerUnit"),
-        bookPnl: decisionRows.filter((row) => Number.isFinite(row.liquidationBookProfit)).length,
-        removalLoss: decisionRows.filter((row) => Number.isFinite(row.removalTotalLoss)).length,
-        decisionSkuCount: decisionRows.length,
+        bookPnl: actionRows.filter((row) => Number.isFinite(row.liquidationBookProfit)).length,
+        removalLoss: actionRows.filter((row) => Number.isFinite(row.removalTotalLoss)).length,
+        actionSkuCount: actionRows.length,
       },
     },
   };
@@ -562,11 +565,11 @@ export function createDemoAnalysis(marketplace = "US") {
 }
 
 export function exportRowsToCsv(rows, currency) {
-  const headers = ["SKU", "ASIN", "Product", "Risk", "Action", "Available", "Sales30", "DaysSupply", "AgedUnits", "ExcessUnits", `SalePrice_${currency}`, "ProductCostRate", `ProductCost_${currency}`, "FBAFulfillmentFeeRate", `FBAFulfillmentFee_${currency}`, "FirstMileRate", `FirstMileCost_${currency}`, `NormalSaleNetPerUnit_${currency}`, `NormalSaleFullProfitPerUnit_${currency}`, `Storage_${currency}`, `AgedFee_${currency}`, `LiquidationNet_${currency}`, `LiquidationBookProfit_${currency}`, `AmazonRemovalFee_${currency}`, `RemovalTotalLoss_${currency}`];
+  const headers = ["SKU", "ASIN", "Product", "Risk", "Action", "Available", "Sales30", "DaysSupply", "AgedUnits", "ActionUnits_AgedOnly", "ExcessUnits", `SalePrice_${currency}`, "ProductCostRate", `ProductCost_${currency}`, "FBAFulfillmentFeeRate", `FBAFulfillmentFee_${currency}`, "FirstMileRate", `FirstMileCost_${currency}`, `NormalSaleNetPerUnit_${currency}`, `NormalSaleFullProfitPerUnit_${currency}`, `Storage_${currency}`, `AgedFee_${currency}`, `LiquidationNet_${currency}`, `LiquidationBookProfit_${currency}`, `AmazonRemovalFee_${currency}`, `RemovalTotalLoss_${currency}`];
   const escape = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
   const lines = rows.map((row) => [
     row.sku, row.asin, row.product, row.risk, row.action, row.available, row.sales30,
-    row.daysSupply, row.aged, row.excess, row.price, row.productCostRate, row.productCost,
+    row.daysSupply, row.aged, row.actionUnits, row.excess, row.price, row.productCostRate, row.productCost,
     row.fulfillmentFeeRate, row.fulfillmentFee, row.firstMileRate, row.firstMileCost,
     row.normalSaleNetPerUnit, row.normalSaleFullProfitPerUnit,
     row.storageEstimate, row.agedFee, row.liquidationNet, row.liquidationBookProfit, row.removalFee, row.removalTotalLoss,
