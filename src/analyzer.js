@@ -599,9 +599,15 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
     normalized.processingFeeUnit = feeFromTier(rule.processing[normalized.sizeTier], normalized.weight, rule.incrementRounding);
     normalized.liquidationGross = normalized.price * normalized.actionUnits * LIQUIDATION.grossRecoveryRate;
     normalized.liquidationReferral = normalized.liquidationGross * LIQUIDATION.referralFeeRate;
+    normalized.liquidationProcessing = normalized.processingFeeUnit === null
+      ? null
+      : normalized.processingFeeUnit * normalized.actionUnits;
+    normalized.liquidationFee = Number.isFinite(normalized.liquidationProcessing)
+      ? normalized.liquidationReferral + normalized.liquidationProcessing
+      : null;
     normalized.liquidationNet = normalized.processingFeeUnit === null
       ? null
-      : normalized.liquidationGross - normalized.liquidationReferral - normalized.processingFeeUnit * normalized.actionUnits;
+      : normalized.liquidationGross - normalized.liquidationFee;
     normalized.removalFee = normalized.removalFeeUnit === null ? null : normalized.removalFeeUnit * normalized.actionUnits;
     normalized.knownProductCost = Number.isFinite(normalized.productCost) ? normalized.productCost * normalized.actionUnits : null;
     normalized.knownFirstMileCost = Number.isFinite(normalized.firstMileCost) ? normalized.firstMileCost * normalized.actionUnits : null;
@@ -720,6 +726,10 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
       cappedActionUnits: analyzed.reduce((total, row) => total + Math.min(row.actionUnits, row.available), 0),
       storage: sum("storageEstimate"),
       agedFee: sum("agedFee"),
+      liquidationGross: sum("liquidationGross"),
+      liquidationReferral: sum("liquidationReferral"),
+      liquidationProcessing: sum("liquidationProcessing"),
+      liquidationFee: sum("liquidationFee"),
       liquidationNet: sum("liquidationNet"),
       liquidationBookProfit: sum("liquidationBookProfit"),
       removalFee: sum("removalFee"),
@@ -798,7 +808,7 @@ export function exportRowsToCsv(rows, currency) {
     `Hold${horizonDays}TotalHoldingCost_${currency}`, `Hold${horizonDays}ThenLiquidateValue_${currency}`,
     `Hold${horizonDays}Recommendation`,
   ]);
-  const headers = ["SKU", "ASIN", "Product", "Risk", "Action", "Available", "Sales30", "DaysSupply", "AgedUnits", "ActionUnits_AgedOnly", "ExcessUnits", `SalePrice_${currency}`, "ProductCostRate", `ProductCost_${currency}`, "FBAFulfillmentFeeRate", `FBAFulfillmentFee_${currency}`, "FirstMileRate", `FirstMileCost_${currency}`, `NormalSaleNetPerUnit_${currency}`, `NormalSaleFullProfitPerUnit_${currency}`, `Storage_${currency}`, `AgedFee_${currency}`, `LiquidationNet_${currency}`, `LiquidationBookProfit_${currency}`, `AmazonRemovalFee_${currency}`, `RemovalTotalLoss_${currency}`, "BreakEvenDays", ...forecastHeaders];
+  const headers = ["SKU", "ASIN", "Product", "Risk", "Action", "Available", "Sales30", "DaysSupply", "AgedUnits", "ActionUnits_AgedOnly", "ExcessUnits", `SalePrice_${currency}`, "ProductCostRate", `ProductCost_${currency}`, "FBAFulfillmentFeeRate", `FBAFulfillmentFee_${currency}`, "FirstMileRate", `FirstMileCost_${currency}`, `NormalSaleNetPerUnit_${currency}`, `NormalSaleFullProfitPerUnit_${currency}`, `Storage_${currency}`, `AgedFee_${currency}`, `LiquidationGross_${currency}`, `LiquidationReferralFee_${currency}`, `LiquidationProcessingFee_${currency}`, `LiquidationTotalFee_${currency}`, `LiquidationNet_${currency}`, `LiquidationBookProfit_${currency}`, `AmazonRemovalFee_${currency}`, `RemovalTotalLoss_${currency}`, "BreakEvenDays", ...forecastHeaders];
   const escape = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
   const lines = rows.map((row) => {
     const forecastValues = FORECAST_HORIZONS.flatMap((horizonDays) => {
@@ -813,7 +823,8 @@ export function exportRowsToCsv(rows, currency) {
     row.daysSupply, row.aged, row.actionUnits, row.excess, row.price, row.productCostRate, row.productCost,
     row.fulfillmentFeeRate, row.fulfillmentFee, row.firstMileRate, row.firstMileCost,
     row.normalSaleNetPerUnit, row.normalSaleFullProfitPerUnit,
-    row.storageEstimate, row.agedFee, row.liquidationNet, row.liquidationBookProfit, row.removalFee, row.removalTotalLoss,
+    row.storageEstimate, row.agedFee, row.liquidationGross, row.liquidationReferral, row.liquidationProcessing,
+    row.liquidationFee, row.liquidationNet, row.liquidationBookProfit, row.removalFee, row.removalTotalLoss,
     row.breakEvenDays, ...forecastValues,
   ].map(escape).join(",");
   });

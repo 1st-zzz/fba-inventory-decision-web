@@ -44,7 +44,12 @@ test("parses and merges synthetic reports without server state", () => {
   assert.equal(result.summary.actionUnits, 70);
   assert.equal(result.summary.storage, 12.5);
   assert.ok(Math.abs(result.rows[0].removalFee - 107.1) < 1e-9);
+  assert.equal(result.rows[0].liquidationGross, 105);
+  assert.equal(result.rows[0].liquidationReferral, 15.75);
+  assert.equal(result.rows[0].liquidationProcessing, 21);
+  assert.equal(result.rows[0].liquidationFee, 36.75);
   assert.equal(result.rows[0].liquidationNet, 68.25);
+  assert.equal(result.summary.liquidationFee, 36.75);
 });
 
 test("liquidation headline excludes product and first-mile costs", () => {

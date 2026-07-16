@@ -58,7 +58,7 @@ root.innerHTML = `
       <span class="brand-mark">F</span>
       <span>FBA 库存决策台<small>本地分析 · 不保存卖家数据</small></span>
     </a>
-    <nav aria-label="页面导航"><a href="#setup">数据设置</a><a href="#decision">决策结果</a><a href="#sku-list">SKU 清单</a></nav>
+    <nav aria-label="页面导航"><a href="#setup">数据设置</a><a href="#inventory-overview">库存概况</a><a href="#fee-calculation">费用测算</a><a href="#sku-list">SKU 清单</a></nav>
     <div class="privacy-pill"><span></span>文件仅在当前浏览器处理</div>
   </header>
 
@@ -95,55 +95,59 @@ root.innerHTML = `
       </div>
     </section>
 
-    <section class="workspace" id="decision">
+    <section class="workspace" id="inventory-overview">
       <div class="workspace-heading">
-        <div><p class="eyebrow">STEP 02 · DECIDE</p><h2 id="result-title">脱敏演示结果</h2><p id="result-context" class="result-context"></p></div>
+        <div><p class="eyebrow">STEP 02 · REVIEW</p><h2 id="result-title">脱敏演示 · 库存概况</h2><p id="result-context" class="result-context"></p></div>
         <div class="result-actions"><span id="rule-version" class="rule-version"></span><button id="export-button" class="text-button">导出完整 CSV</button></div>
       </div>
       <div id="status-box"></div>
       <div class="result-overview-bar">
-        <div class="readiness-summary"><span>决策可信度</span><strong id="confidence-level"></strong><small id="confidence-note"></small></div>
+        <div class="readiness-summary"><span>数据完整度</span><strong id="confidence-level"></strong><small id="confidence-note"></small></div>
         <details id="coverage-details" class="coverage-details"><summary>数据覆盖与已识别报告 <span>展开查看</span></summary><div id="readiness-grid" class="readiness-grid"></div><div id="report-strip" class="report-strip"></div></details>
       </div>
 
-      <section class="decision-panel">
+      <section class="inventory-overview-panel">
+        <div class="secondary-metrics-head"><p class="eyebrow">SKU & INVENTORY</p><h2>SKU 与库存概况</h2></div>
+        <div id="summary-grid" class="summary-grid"></div>
+
+        <section class="age-panel">
+          <div class="age-panel-head"><div><p class="eyebrow">AGED INVENTORY BUCKETS</p><h2>各库龄区间库存</h2></div><p id="age-coverage"></p></div>
+          <div class="age-panel-body"><div id="age-bucket-grid" class="age-bucket-grid"></div><p class="age-note">库存件数来自最新库龄快照。橙色区间表示当前站点已进入长期仓储计费范围。</p></div>
+        </section>
+      </section>
+
+      <section class="decision-panel" id="fee-calculation">
         <div class="decision-panel-head">
-          <div><p class="eyebrow">DECISION FIRST</p><h2>怎么处理这批库存</h2></div>
-          <div class="horizon-control" aria-label="选择继续持有天数"><span>比较继续销售多久</span><div id="horizon-buttons"></div></div>
+          <div><p class="eyebrow">STEP 03 · CALCULATE</p><h2>费用测算与处置比较</h2><p class="section-note">先看当前处置费用，再看继续放置不同阶段会增加多少仓储费。</p></div>
+          <div class="horizon-control" aria-label="选择继续持有天数"><span>选择继续放置阶段</span><div id="horizon-buttons"></div></div>
         </div>
         <div id="decision-scope" class="decision-scope"></div>
+        <div id="fee-summary-grid" class="fee-summary-grid"></div>
+
+        <section class="support-panel forecast-panel cost-forecast-panel">
+          <div class="subsection-head"><div><p class="eyebrow">HOLDING COST BY STAGE</p><h3>继续放置各阶段仓储费</h3></div><b id="forecast-coverage"></b></div>
+          <p id="forecast-summary" class="forecast-summary"></p>
+          <div id="forecast-chart" class="forecast-chart"></div>
+          <div class="forecast-legend"><span class="base-dot"></span>基础仓储费 <span class="aged-dot"></span>库存龄附加费</div>
+          <div id="forecast-driver" class="forecast-driver"></div>
+        </section>
+
+        <div class="decision-section-label"><p class="eyebrow">ACTION COMPARISON</p><h3>继续销售还是现在清算</h3></div>
         <div id="recommendation-banner" class="recommendation-banner"></div>
         <div id="scenario-grid" class="scenario-grid"></div>
         <div id="decision-reason" class="decision-reason"></div>
         <div id="removal-reference" class="removal-reference"></div>
 
-        <div class="decision-support-grid">
-          <section class="support-panel sensitivity-panel">
-            <div class="subsection-head"><div><p class="eyebrow">SALES CHECK</p><h3>销量变动会改变结论吗？</h3></div><p>按最近30日销量上下浮动30%</p></div>
-            <p id="sensitivity-conclusion" class="sensitivity-conclusion"></p>
-            <div id="sensitivity-grid" class="sensitivity-grid"></div>
-          </section>
-          <section class="support-panel forecast-panel">
-            <div class="subsection-head"><div><p class="eyebrow">HOLDING COST</p><h3>继续放会多付多少仓储费？</h3></div><b id="forecast-coverage"></b></div>
-            <p id="forecast-summary" class="forecast-summary"></p>
-            <div id="forecast-chart" class="forecast-chart"></div>
-            <div class="forecast-legend"><span class="base-dot"></span>基础仓储费 <span class="aged-dot"></span>库存龄附加费</div>
-            <div id="forecast-driver" class="forecast-driver"></div>
-          </section>
-        </div>
+        <section class="support-panel sensitivity-panel">
+          <div class="subsection-head"><div><p class="eyebrow">SALES CHECK</p><h3>销量变动会改变结论吗？</h3></div><p>按最近30日销量上下浮动30%</p></div>
+          <p id="sensitivity-conclusion" class="sensitivity-conclusion"></p>
+          <div id="sensitivity-grid" class="sensitivity-grid"></div>
+        </section>
       </section>
-
-      <div class="secondary-metrics-head"><p class="eyebrow">SUPPORTING METRICS</p><h2>补充监控指标</h2></div>
-      <div id="summary-grid" class="summary-grid"></div>
-
-      <details class="age-panel">
-        <summary><div><p class="eyebrow">AGED INVENTORY BUCKETS</p><h2>库龄收费区间库存</h2></div><p id="age-coverage"></p></summary>
-        <div class="age-panel-body"><div id="age-bucket-grid" class="age-bucket-grid"></div><p class="age-note">库龄来自最新快照；区间预测按区间下限推进。与当前可售库存存在差异时，会在可信度区域提示。</p></div>
-      </details>
 
       <section class="table-panel" id="sku-list">
         <div class="table-head">
-          <div><p class="eyebrow">STEP 03 · ACT</p><h2>SKU 执行清单</h2></div>
+          <div><p class="eyebrow">STEP 04 · ACT</p><h2>SKU 执行清单</h2></div>
           <div class="filters">
             <input id="search-input" type="search" placeholder="搜索 SKU / ASIN / 商品" />
             <select id="risk-filter" aria-label="风险筛选"><option>全部</option><option>高</option><option>中</option><option>低</option></select>
@@ -259,6 +263,10 @@ function metric(label, value, note, tone = "") {
   return `<article class="metric ${tone}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(note)}</small></article>`;
 }
 
+function feeMetric(label, value, note, tone = "") {
+  return `<article class="fee-metric ${tone}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(note)}</small></article>`;
+}
+
 function confidenceModel(summary, forecast) {
   if (!summary.actionUnits) return { level: "无需处理", tone: "neutral", note: "当前没有进入计费区间的库存" };
   const completeComparison = forecast.readiness.comparison === forecast.readiness.actionSkuCount;
@@ -295,7 +303,7 @@ function renderReadiness(summary, forecast) {
 function render() {
   const { summary, rule } = current;
   const forecast = selectedSummaryForecast();
-  document.querySelector("#result-title").textContent = usingDemo ? "脱敏演示结果" : "本地报告分析结果";
+  document.querySelector("#result-title").textContent = usingDemo ? "脱敏演示 · 库存概况" : "上传数据 · 库存概况";
   document.querySelector("#result-context").textContent = `测算起始日 ${current.analysisDate} · ${rule.marketplace} · ${rule.currency}${summary.ageSnapshot ? ` · 库龄快照 ${dateLabel(summary.ageSnapshot)}` : ""}`;
   document.querySelector("#rule-version").textContent = `${rule.version} · 生效 ${rule.effectiveFrom}`;
   document.querySelector("#rule-source").href = rule.sourceUrl;
@@ -307,11 +315,23 @@ function render() {
 
   const snapshotDelta = summary.actionUnits - summary.cappedActionUnits;
   document.querySelector("#summary-grid").innerHTML = [
-    metric("需处理计费库存", number(summary.actionUnits), `${number(summary.readiness.actionSkuCount)} 个 SKU${snapshotDelta > 0 ? ` · 比当前可售多 ${number(snapshotDelta)} 件` : ""}`, "warning"),
+    metric("SKU 总数", number(summary.skuCount), `高风险 ${number(summary.riskCounts.high)} 个`),
+    metric("可售库存", number(summary.available), "当前可售数量"),
+    metric("调拨中库存", number(summary.transfer), "正在转入或转库"),
+    metric("长期仓储计费库存", number(summary.actionUnits), `${number(summary.readiness.actionSkuCount)} 个 SKU${snapshotDelta > 0 ? ` · 比当前可售多 ${number(snapshotDelta)} 件` : ""}`, "warning"),
     metric("预计冗余库存", number(summary.excess), "仅作风险提示，不计入清算/移除", "neutral"),
-    metric("高风险 SKU", number(summary.riskCounts.high), `共 ${number(summary.skuCount)} 个 SKU`, "danger"),
-    metric("本月基础仓储费", money(summary.storage), `全部 ${number(summary.available)} 件库存`),
-    metric("本月库存龄附加费", money(summary.agedFee), `${rule.marketplace} 从 ${rule.ageStart} 天起`),
+    metric("高风险 SKU", number(summary.riskCounts.high), `中风险 ${number(summary.riskCounts.medium)} · 低风险 ${number(summary.riskCounts.low)}`, "danger"),
+  ].join("");
+
+  const fullRemovalLoss = summary.readiness.actionSkuCount > 0 && summary.readiness.removalLoss === summary.readiness.actionSkuCount;
+  const removalTotalLoss = summary.actionUnits <= 0 ? "无计费库存" : fullRemovalLoss ? money(summary.removalTotalLoss) : `待补 ${number(summary.readiness.actionSkuCount - summary.readiness.removalLoss)} 个 SKU`;
+  document.querySelector("#fee-summary-grid").innerHTML = [
+    feeMetric("当前月基础仓储费", money(summary.storage), `全部 ${number(summary.available)} 件库存`),
+    feeMetric("当前月长期仓储费", money(summary.agedFee), `${rule.marketplace} 从 ${rule.ageStart} 天起`, "warning"),
+    feeMetric("清算费用", money(summary.liquidationFee), `转介费 ${money(summary.liquidationReferral)} + 处理费 ${money(summary.liquidationProcessing)}`),
+    feeMetric("清算预计净回收", money(summary.liquidationNet), `毛回收 ${money(summary.liquidationGross)} − 清算费用`, "warning"),
+    feeMetric("Amazon 移除费", money(summary.removalFee), "费用金额以正数显示"),
+    feeMetric("移除总损失", removalTotalLoss, "含采购成本、头程与移除费", "danger"),
   ].join("");
 
   document.querySelector("#horizon-buttons").innerHTML = FORECAST_HORIZONS.map((days) => `<button type="button" data-horizon="${days}" class="${days === selectedHorizon ? "active" : ""}">${days} 天</button>`).join("");
@@ -340,7 +360,7 @@ function render() {
     : "未来 365 天内未出现整体清算临界点";
 
   document.querySelector("#decision-scope").innerHTML = summary.actionUnits > 0
-    ? `本次只判断进入长期仓储计费区间的库存：<strong>${number(summary.actionUnits)} 件</strong>，涉及 <strong>${number(summary.readiness.actionSkuCount)} 个 SKU</strong>。预计冗余库存不参与清算或移除测算。`
+    ? `当前月基础仓储费按全部可售库存测算；清算、移除和继续放置费用只针对长期仓储计费库存：<strong>${number(summary.actionUnits)} 件</strong>，涉及 <strong>${number(summary.readiness.actionSkuCount)} 个 SKU</strong>。`
     : "当前没有进入长期仓储计费区间的库存，无需比较清算或移除。";
   document.querySelector("#recommendation-banner").className = `recommendation-banner tone-${forecast.recommendation.key}`;
   document.querySelector("#recommendation-banner").innerHTML = `
@@ -349,9 +369,7 @@ function render() {
   `;
 
   const fullBookPnl = summary.readiness.actionSkuCount > 0 && summary.readiness.bookPnl === summary.readiness.actionSkuCount;
-  const fullRemovalLoss = summary.readiness.actionSkuCount > 0 && summary.readiness.removalLoss === summary.readiness.actionSkuCount;
   const liquidationBookPnl = summary.actionUnits <= 0 ? "无计费库存" : fullBookPnl ? money(summary.liquidationBookProfit) : `待补 ${number(summary.readiness.actionSkuCount - summary.readiness.bookPnl)} 个 SKU`;
-  const removalTotalLoss = summary.actionUnits <= 0 ? "无计费库存" : fullRemovalLoss ? money(summary.removalTotalLoss) : `待补 ${number(summary.readiness.actionSkuCount - summary.readiness.removalLoss)} 个 SKU`;
   document.querySelector("#scenario-grid").innerHTML = `
     <article class="scenario-card hold ${forecast.recommendation.key === "hold" ? "recommended" : ""}"><div><span>方案 A · 继续销售 ${selectedHorizon} 天</span><b>${forecast.recommendation.key === "hold" ? "推荐" : "对比方案"}</b></div><p class="scenario-value-label">期末预计可留下的现金</p><h3>${moneyOrPending(forecast.holdThenLiquidateValue)}</h3><dl><div><dt>期间新增仓储费</dt><dd>-${moneyOrPending(forecast.totalHoldingCost)}</dd></div><div><dt>预计售出</dt><dd>${number(forecast.expectedSoldUnits)} 件</dd></div><div><dt>到期仍剩</dt><dd>${number(forecast.remainingUnits)} 件</dd></div></dl></article>
     <article class="scenario-card liquidate ${forecast.recommendation.key === "liquidate" ? "recommended" : ""}"><div><span>方案 B · 现在清算</span><b>${forecast.recommendation.key === "liquidate" ? "推荐" : "对比方案"}</b></div><p class="scenario-value-label">现在预计可收回的现金</p><h3>${money(summary.liquidationNet)}</h3><dl><div><dt>等待时间</dt><dd>0 天</dd></div><div><dt>新增仓储费</dt><dd>${money(0)}</dd></div><div><dt>扣历史成本后账面损益</dt><dd>${liquidationBookPnl}</dd></div></dl></article>
@@ -363,7 +381,7 @@ function render() {
       ? `继续销售 ${selectedHorizon} 天预计售出 ${number(forecast.expectedSoldUnits)} 件，即使计入 ${money(forecast.totalHoldingCost)} 仓储费，仍比现在清算多保留 ${money(decisionDifference)} 现金。`
       : `两种方案只完成 ${number(forecast.readiness.comparison)}/${number(forecast.readiness.actionSkuCount)} 个计费 SKU 的比较，请先补全售价、佣金或 FBA 配送费。`;
   document.querySelector("#decision-reason").innerHTML = `<b>为什么：</b>${escapeHtml(reasonText)}`;
-  document.querySelector("#removal-reference").innerHTML = `<div><b>移除费用参考（不参与建议）</b><span>缺少移除后的回收价值和下游处理成本，不能与清算直接比较。</span></div><dl><div><dt>Amazon 移除费</dt><dd>${money(-summary.removalFee)}</dd></div><div><dt>含采购与头程的总损失</dt><dd>${removalTotalLoss}</dd></div></dl>`;
+  document.querySelector("#removal-reference").innerHTML = `<div><b>移除费用参考（不参与建议）</b><span>缺少移除后的回收价值和下游处理成本，不能与清算直接比较。</span></div><dl><div><dt>Amazon 移除费</dt><dd>${money(summary.removalFee)}</dd></div><div><dt>含采购与头程的总损失</dt><dd>${removalTotalLoss}</dd></div></dl>`;
 
   const sensitivityKeys = forecast.sensitivity.map((scenario) => scenario.recommendation.key);
   const sensitivityStable = sensitivityKeys.length > 0 && sensitivityKeys.every((key) => key === sensitivityKeys[0]) && sensitivityKeys[0] !== "pending";
@@ -381,7 +399,7 @@ function render() {
   document.querySelector("#forecast-chart").innerHTML = summary.forecasts.map((item) => {
     const baseWidth = Math.max(0, item.baseStorageCost / maxForecastCost * 100);
     const agedWidth = Math.max(0, item.agedSurchargeCost / maxForecastCost * 100);
-    return `<article class="forecast-row ${item.horizonDays === selectedHorizon ? "active" : ""}"><div class="forecast-label"><b>${item.horizonDays} 天</b><span>剩余 ${number(item.remainingUnits)} 件</span></div><div class="forecast-bar" aria-label="${item.horizonDays} 天累计新增仓储费 ${money(item.totalHoldingCost)}"><span class="base" style="width:${baseWidth}%"></span><span class="aged" style="width:${agedWidth}%"></span></div><strong>${money(item.totalHoldingCost)}</strong></article>`;
+    return `<article class="forecast-row ${item.horizonDays === selectedHorizon ? "active" : ""}"><div class="forecast-label"><b>${item.horizonDays} 天</b><span>剩余 ${number(item.remainingUnits)} 件</span></div><div class="forecast-bar" aria-label="${item.horizonDays} 天累计新增仓储费 ${money(item.totalHoldingCost)}"><span class="base" style="width:${baseWidth}%"></span><span class="aged" style="width:${agedWidth}%"></span></div><div class="forecast-cost"><strong>${money(item.totalHoldingCost)}</strong><small>基础 ${money(item.baseStorageCost)} + 长期 ${money(item.agedSurchargeCost)}</small></div></article>`;
   }).join("");
   const forecast90 = summary.forecasts.find((item) => item.horizonDays === 90);
   const forecast180 = summary.forecasts.find((item) => item.horizonDays === 180);
@@ -421,7 +439,7 @@ async function analyzeSelectedFiles({ scrollToResults = true } = {}) {
     usingDemo = false;
     setStatus(`分析完成：识别 ${recognized.length} 个有效工作表。文件未离开当前浏览器。`, "success");
     render();
-    if (scrollToResults) requestAnimationFrame(() => document.querySelector("#decision").scrollIntoView({ behavior: "smooth", block: "start" }));
+    if (scrollToResults) requestAnimationFrame(() => document.querySelector("#inventory-overview").scrollIntoView({ behavior: "smooth", block: "start" }));
   } catch (error) {
     setStatus(error instanceof Error ? error.message : "文件解析失败，请检查报告格式。", "error");
   } finally {
@@ -461,7 +479,7 @@ document.querySelector("#template-button").addEventListener("click", () => {
 document.querySelector("#demo-button").addEventListener("click", () => {
   selectedFiles = []; parsedSources = []; fileInput.value = ""; usingDemo = true;
   current = createDemoAnalysis(marketplace.value, analysisOptions()); updateSelectedFiles(); setStatus("已恢复公开脱敏演示数据。", "success"); render();
-  requestAnimationFrame(() => document.querySelector("#decision").scrollIntoView({ behavior: "smooth", block: "start" }));
+  requestAnimationFrame(() => document.querySelector("#inventory-overview").scrollIntoView({ behavior: "smooth", block: "start" }));
 });
 marketplace.addEventListener("change", () => { if (!usingDemo && selectedFiles.length) analyzeSelectedFiles({ scrollToResults: false }); else recalculate(); });
 analysisDateInput.addEventListener("change", recalculate);
