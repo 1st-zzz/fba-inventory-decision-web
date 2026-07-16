@@ -432,7 +432,7 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
     normalized.removalTotalLoss = Number.isFinite(normalized.removalFee)
       && Number.isFinite(normalized.knownProductCost)
       && Number.isFinite(normalized.knownFirstMileCost)
-      ? normalized.removalFee + normalized.knownProductCost + normalized.knownFirstMileCost
+      ? -(normalized.removalFee + normalized.knownProductCost + normalized.knownFirstMileCost)
       : null;
     normalized.normalSaleNetPerUnit = normalized.price > 0
       && Number.isFinite(normalized.referralFee)

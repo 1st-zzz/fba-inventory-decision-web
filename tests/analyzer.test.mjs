@@ -77,7 +77,7 @@ test("liquidation headline excludes product and first-mile costs", () => {
   assert.equal(row.normalSaleFullProfitPerUnit, 40);
   assert.equal(row.liquidationBookProfit, -288.75);
   assert.ok(Math.abs(row.removalFee - 8.4) < 1e-9);
-  assert.ok(Math.abs(row.removalTotalLoss - 358.4) < 1e-9);
+  assert.ok(Math.abs(row.removalTotalLoss + 358.4) < 1e-9);
 });
 
 test("uses global sale-price percentages for all three estimated costs", () => {

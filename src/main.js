@@ -117,7 +117,7 @@ root.innerHTML = `
       <article class="decision-card remove">
         <span>移除预计总损失</span><h3 id="removal-total-loss"></h3>
         <div class="decision-sub"><span>其中 Amazon 移除费</span><b id="removal-total"></b></div>
-        <p>总损失 = 采购成本 + 头程 + Amazon移除费；不含移除后的回收价值及下游处理成本。</p>
+        <p>总损失以负数表示：−（采购成本 + 头程 + Amazon移除费）；不含移除后的回收价值及下游处理成本。</p>
       </article>
     </section>
 
