@@ -14,7 +14,7 @@ test("detects the six supported report types", () => {
   assert.equal(detectReportType(["fnsku", "estimated_monthly_storage_fee"]), "charge");
   assert.equal(detectReportType(["seller-sku", "estimated-referral-fee-per-item"]), "commission");
   assert.equal(detectReportType(["seller-sku", "item-name", "asin1"]), "products");
-  assert.equal(detectReportType(["seller-sku", "unit-cost", "fulfillment-fee-per-unit", "first-mile-cost-rate"]), "costs");
+  assert.equal(detectReportType(["seller-sku", "unit-cost-rate", "fulfillment-fee-rate", "first-mile-cost-rate"]), "costs");
 });
 
 test("parses and merges synthetic reports without server state", () => {
@@ -78,7 +78,7 @@ test("liquidation headline excludes product and first-mile costs", () => {
   assert.equal(row.liquidationBookProfit, -288.75);
 });
 
-test("uses a global first-mile percentage when a SKU override is absent", () => {
+test("uses global sale-price percentages for all three estimated costs", () => {
   const result = analyzeSources([{
     fileName: "demo.csv",
     sheetName: "Sheet1",
@@ -90,29 +90,33 @@ test("uses a global first-mile percentage when a SKU override is absent", () => 
       sales30: 1,
       excess: 2,
       price: 100,
-      productCost: 30,
       referralFee: 15,
-      fulfillmentFee: 10,
       weight: 0.4,
       sizeTier: "standard",
       ageMode: "detailed",
       age: {},
     }],
-  }], "US", { defaultFirstMileRate: 8 });
+  }], "US", { defaultProductCostRate: 30, defaultFulfillmentFeeRate: 18, defaultFirstMileRate: 8 });
   const row = result.rows[0];
+  assert.equal(row.productCostRate, 0.3);
+  assert.equal(row.productCost, 30);
+  assert.equal(row.fulfillmentFeeRate, 0.18);
+  assert.equal(row.fulfillmentFee, 18);
   assert.equal(row.firstMileRate, 0.08);
   assert.equal(row.firstMileCost, 8);
-  assert.equal(row.normalSaleFullProfitPerUnit, 37);
+  assert.equal(row.normalSaleFullProfitPerUnit, 29);
 });
 
 test("parses a cost supplement and merges it by seller SKU", () => {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
-    ["seller-sku", "unit-cost", "fulfillment-fee-per-unit", "first-mile-cost-rate"],
-    ["DEMO-COST-002", 6.5, 3.25, "7.5%"],
+    ["seller-sku", "unit-cost-rate", "fulfillment-fee-rate", "first-mile-cost-rate"],
+    ["DEMO-COST-002", "30%", 18, "7.5%"],
   ]), "Costs");
   const parsed = workbookToSources(workbook, "costs.xlsx", XLSX, "US");
   assert.equal(parsed[0].type, "costs");
+  assert.equal(parsed[0].rows[0].productCostRate, 0.3);
+  assert.equal(parsed[0].rows[0].fulfillmentFeeRate, 0.18);
   assert.equal(parsed[0].rows[0].firstMileRate, 0.075);
 
   const result = analyzeSources([{
@@ -123,10 +127,10 @@ test("parses a cost supplement and merges it by seller SKU", () => {
     rows: [{ sku: "DEMO-COST-002", available: 10, sales30: 2, excess: 4, price: 20, referralFee: 3, weight: 0.5, sizeTier: "standard", ageMode: "detailed", age: {} }],
   }, ...parsed], "US");
   const row = result.rows[0];
-  assert.equal(row.productCost, 6.5);
-  assert.equal(row.fulfillmentFee, 3.25);
+  assert.equal(row.productCost, 6);
+  assert.ok(Math.abs(row.fulfillmentFee - 3.6) < 1e-9);
   assert.equal(row.firstMileCost, 1.5);
-  assert.equal(row.normalSaleFullProfitPerUnit, 5.75);
+  assert.ok(Math.abs(row.normalSaleFullProfitPerUnit - 5.9) < 1e-9);
 });
 
 test("public demo uses only synthetic identifiers", () => {

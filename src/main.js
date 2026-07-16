@@ -76,10 +76,10 @@ root.innerHTML = `
       </label>
       <div id="selected-files" class="selected-files"></div>
       <div class="cost-controls">
-        <label>统一头程占售价比例（%）
-          <input id="first-mile-rate" type="number" min="0" max="100" step="0.1" placeholder="例如 8" />
-          <small>成本表中的 SKU 比例会优先覆盖此处</small>
-        </label>
+        <div class="cost-control-heading"><b>统一预估成本</b><small>全部按当前售价比例计算；成本表中的 SKU 比例优先</small></div>
+        <label>采购成本（%）<input id="product-cost-rate" type="number" min="0" max="100" step="0.1" placeholder="例如 30" /></label>
+        <label>FBA配送费（%）<input id="fulfillment-fee-rate" type="number" min="0" max="100" step="0.1" placeholder="例如 18" /></label>
+        <label>头程（%）<input id="first-mile-rate" type="number" min="0" max="100" step="0.1" placeholder="例如 8" /></label>
         <button id="template-button" class="secondary-button" type="button">下载成本补充模板</button>
       </div>
       <div class="upload-actions">
@@ -161,6 +161,8 @@ const dropzone = document.querySelector("#dropzone");
 const analyzeButton = document.querySelector("#analyze-button");
 const clearButton = document.querySelector("#clear-button");
 const marketplace = document.querySelector("#marketplace");
+const productCostRateInput = document.querySelector("#product-cost-rate");
+const fulfillmentFeeRateInput = document.querySelector("#fulfillment-fee-rate");
 const firstMileRateInput = document.querySelector("#first-mile-rate");
 
 const fileKey = (file) => `${file.name}::${file.size}::${file.lastModified}`;
@@ -177,9 +179,17 @@ function appendFiles(files) {
   }
 }
 
-function defaultFirstMileRate() {
-  const value = Number(firstMileRateInput.value);
-  return Number.isFinite(value) && firstMileRateInput.value !== "" ? value / 100 : null;
+function inputRate(input) {
+  const value = Number(input.value);
+  return Number.isFinite(value) && input.value !== "" ? value / 100 : null;
+}
+
+function defaultCostRates() {
+  return {
+    defaultProductCostRate: inputRate(productCostRateInput),
+    defaultFulfillmentFeeRate: inputRate(fulfillmentFeeRateInput),
+    defaultFirstMileRate: inputRate(firstMileRateInput),
+  };
 }
 
 function setStatus(message, kind = "info") {
@@ -289,7 +299,7 @@ async function analyzeSelectedFiles() {
     const recognized = nextSources.filter((source) => source.type !== "unknown" && source.rows.length);
     if (!recognized.length) throw new Error("没有识别到可用报告，请检查文件类型和表头。");
     parsedSources = recognized;
-    current = analyzeSources(parsedSources, marketplace.value, { defaultFirstMileRate: defaultFirstMileRate() });
+    current = analyzeSources(parsedSources, marketplace.value, defaultCostRates());
     usingDemo = false;
     setStatus(`已在浏览器本地完成分析：识别 ${recognized.length} 个有效工作表，未上传任何文件。`, "success");
     render();
@@ -340,7 +350,7 @@ clearButton.addEventListener("click", () => {
   setStatus("已清空待分析文件。", "success");
 });
 document.querySelector("#template-button").addEventListener("click", () => {
-  const csv = "\ufeffseller-sku,unit-cost,fulfillment-fee-per-unit,first-mile-cost-rate\r\nDEMO-SKU-001,4.50,3.20,8\r\n";
+  const csv = "\ufeffseller-sku,unit-cost-rate,fulfillment-fee-rate,first-mile-cost-rate\r\nDEMO-SKU-001,30,18,8\r\n";
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -362,15 +372,17 @@ document.querySelector("#demo-button").addEventListener("click", () => {
 marketplace.addEventListener("change", () => {
   current = usingDemo
     ? createDemoAnalysis(marketplace.value)
-    : analyzeSources(parsedSources, marketplace.value, { defaultFirstMileRate: defaultFirstMileRate() });
+    : analyzeSources(parsedSources, marketplace.value, defaultCostRates());
   render();
 });
-firstMileRateInput.addEventListener("change", () => {
-  if (!usingDemo && parsedSources.length) {
-    current = analyzeSources(parsedSources, marketplace.value, { defaultFirstMileRate: defaultFirstMileRate() });
-    render();
-  }
-});
+for (const input of [productCostRateInput, fulfillmentFeeRateInput, firstMileRateInput]) {
+  input.addEventListener("change", () => {
+    if (!usingDemo && parsedSources.length) {
+      current = analyzeSources(parsedSources, marketplace.value, defaultCostRates());
+      render();
+    }
+  });
+}
 document.querySelector("#search-input").addEventListener("input", (event) => {
   query = event.target.value.trim();
   render();
