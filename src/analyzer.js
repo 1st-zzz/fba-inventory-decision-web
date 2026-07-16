@@ -429,6 +429,11 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
     normalized.removalFee = normalized.removalFeeUnit === null ? null : normalized.removalFeeUnit * excess;
     normalized.knownProductCost = Number.isFinite(normalized.productCost) ? normalized.productCost * excess : null;
     normalized.knownFirstMileCost = Number.isFinite(normalized.firstMileCost) ? normalized.firstMileCost * excess : null;
+    normalized.removalTotalLoss = Number.isFinite(normalized.removalFee)
+      && Number.isFinite(normalized.knownProductCost)
+      && Number.isFinite(normalized.knownFirstMileCost)
+      ? normalized.removalFee + normalized.knownProductCost + normalized.knownFirstMileCost
+      : null;
     normalized.normalSaleNetPerUnit = normalized.price > 0
       && Number.isFinite(normalized.referralFee)
       && Number.isFinite(normalized.fulfillmentFee)
@@ -459,7 +464,7 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
   if (!analyzed.some((row) => Number.isFinite(row.productCost))) warnings.push("未提供采购成本占售价比例或单件金额：清算预计净回收不能换算为账面损益。");
   if (!analyzed.some((row) => Number.isFinite(row.fulfillmentFee))) warnings.push("未提供 FBA 配送费占售价比例或单件金额：不能计算正常销售单件净回款和完整利润。");
   if (!analyzed.some((row) => Number.isFinite(row.firstMileCost))) warnings.push("未提供头程占售价比例或单件头程：完整利润暂不扣除头程。");
-  warnings.push("未填写移除后回收价值和下游处理成本：移除方案仅展示 Amazon 移除费，不参与最终收益比较。");
+  warnings.push("未填写移除后回收价值和下游处理成本：移除总损失包含采购成本、头程和 Amazon 移除费，但不参与最终收益比较。");
 
   return {
     marketplace,
@@ -478,6 +483,7 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
       liquidationNet: sum("liquidationNet"),
       liquidationBookProfit: sum("liquidationBookProfit"),
       removalFee: sum("removalFee"),
+      removalTotalLoss: sum("removalTotalLoss"),
       riskCounts: {
         high: analyzed.filter((row) => row.risk === "高").length,
         medium: analyzed.filter((row) => row.risk === "中").length,
@@ -492,6 +498,7 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
         firstMile: countReady("firstMileCost"),
         saleProfit: countReady("normalSaleFullProfitPerUnit"),
         bookPnl: decisionRows.filter((row) => Number.isFinite(row.liquidationBookProfit)).length,
+        removalLoss: decisionRows.filter((row) => Number.isFinite(row.removalTotalLoss)).length,
         decisionSkuCount: decisionRows.length,
       },
     },
@@ -535,14 +542,14 @@ export function createDemoAnalysis(marketplace = "US") {
 }
 
 export function exportRowsToCsv(rows, currency) {
-  const headers = ["SKU", "ASIN", "Product", "Risk", "Action", "Available", "Sales30", "DaysSupply", "AgedUnits", "ExcessUnits", `SalePrice_${currency}`, "ProductCostRate", `ProductCost_${currency}`, "FBAFulfillmentFeeRate", `FBAFulfillmentFee_${currency}`, "FirstMileRate", `FirstMileCost_${currency}`, `NormalSaleNetPerUnit_${currency}`, `NormalSaleFullProfitPerUnit_${currency}`, `Storage_${currency}`, `AgedFee_${currency}`, `LiquidationNet_${currency}`, `LiquidationBookProfit_${currency}`, `RemovalFee_${currency}`];
+  const headers = ["SKU", "ASIN", "Product", "Risk", "Action", "Available", "Sales30", "DaysSupply", "AgedUnits", "ExcessUnits", `SalePrice_${currency}`, "ProductCostRate", `ProductCost_${currency}`, "FBAFulfillmentFeeRate", `FBAFulfillmentFee_${currency}`, "FirstMileRate", `FirstMileCost_${currency}`, `NormalSaleNetPerUnit_${currency}`, `NormalSaleFullProfitPerUnit_${currency}`, `Storage_${currency}`, `AgedFee_${currency}`, `LiquidationNet_${currency}`, `LiquidationBookProfit_${currency}`, `AmazonRemovalFee_${currency}`, `RemovalTotalLoss_${currency}`];
   const escape = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
   const lines = rows.map((row) => [
     row.sku, row.asin, row.product, row.risk, row.action, row.available, row.sales30,
     row.daysSupply, row.aged, row.excess, row.price, row.productCostRate, row.productCost,
     row.fulfillmentFeeRate, row.fulfillmentFee, row.firstMileRate, row.firstMileCost,
     row.normalSaleNetPerUnit, row.normalSaleFullProfitPerUnit,
-    row.storageEstimate, row.agedFee, row.liquidationNet, row.liquidationBookProfit, row.removalFee,
+    row.storageEstimate, row.agedFee, row.liquidationNet, row.liquidationBookProfit, row.removalFee, row.removalTotalLoss,
   ].map(escape).join(","));
   return ["\ufeff" + headers.join(","), ...lines].join("\r\n");
 }

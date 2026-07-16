@@ -115,8 +115,9 @@ root.innerHTML = `
         <p>净回收用于判断今天可收回多少现金；账面损益用于复盘历史成本，两者分开显示。</p>
       </article>
       <article class="decision-card remove">
-        <span>立即移除费用</span><h3 id="removal-total"></h3>
-        <p>仅估算 Amazon 移除费用，不含退回物流、回收价值及下游处理成本。</p>
+        <span>移除预计总损失</span><h3 id="removal-total-loss"></h3>
+        <div class="decision-sub"><span>其中 Amazon 移除费</span><b id="removal-total"></b></div>
+        <p>总损失 = 采购成本 + 头程 + Amazon移除费；不含移除后的回收价值及下游处理成本。</p>
       </article>
     </section>
 
@@ -136,7 +137,7 @@ root.innerHTML = `
             <th>SKU / 商品</th><th>风险</th><th>可售</th><th>30日销量</th><th>可售天数</th>
             <th>计费库龄</th><th>冗余</th><th>仓储费</th><th>长期仓储费</th>
             <th>采购成本/件</th><th>FBA配送费/件</th><th>头程/件</th><th>正常销售完整利润/件</th>
-            <th>清算预计净回收</th><th>清算账面损益</th><th>移除费</th><th>建议动作</th>
+            <th>清算预计净回收</th><th>清算账面损益</th><th>Amazon移除费</th><th>移除总损失</th><th>建议动作</th>
           </tr></thead>
           <tbody id="table-body"></tbody>
         </table>
@@ -251,6 +252,13 @@ function render() {
     ? `已覆盖 ${number(summary.skuCount)} 个 SKU`
     : `可计算 ${number(summary.readiness.saleProfit)}/${number(summary.skuCount)} 个 SKU`;
   document.querySelector("#removal-total").textContent = money(summary.removalFee);
+  const fullRemovalLoss = summary.readiness.decisionSkuCount > 0
+    && summary.readiness.removalLoss === summary.readiness.decisionSkuCount;
+  document.querySelector("#removal-total-loss").textContent = summary.readiness.decisionSkuCount === 0
+    ? "无冗余库存"
+    : fullRemovalLoss
+      ? money(summary.removalTotalLoss)
+      : `待补 ${number(summary.readiness.decisionSkuCount - summary.readiness.removalLoss)} 个冗余 SKU`;
 
   const reports = current.reports.filter((report) => report.type !== "unknown");
   document.querySelector("#report-strip").innerHTML = reports.length
@@ -276,6 +284,7 @@ function render() {
       <td>${moneyOrPending(row.liquidationNet)}</td>
       <td>${moneyOrPending(row.liquidationBookProfit)}</td>
       <td>${moneyOrPending(row.removalFee)}</td>
+      <td>${moneyOrPending(row.removalTotalLoss)}</td>
       <td><b class="action">${escapeHtml(row.action)}</b></td>
     </tr>
   `).join("");
