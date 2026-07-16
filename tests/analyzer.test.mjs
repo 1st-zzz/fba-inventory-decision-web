@@ -5,6 +5,7 @@ import {
   analyzeSources,
   createDemoAnalysis,
   detectReportType,
+  exportRowsToCsv,
   workbookToSources,
 } from "../src/analyzer.js";
 
@@ -145,6 +146,8 @@ test("public demo uses only synthetic identifiers", () => {
     assert.ok(result.rows.every((row) => row.sku.startsWith("DEMO-")));
     assert.equal(result.rule.marketplace, marketplace);
     assert.equal(result.summary.ageBuckets.length, 9);
+    assert.equal(result.summary.forecasts.length, 4);
+    assert.ok(result.summary.forecasts.every((forecast) => Number.isFinite(forecast.totalHoldingCost)));
     const bucketUnits = result.summary.ageBuckets.reduce((total, bucket) => total + bucket.units, 0);
     assert.ok(Math.abs(bucketUnits - result.summary.available) < 1e-9);
   }
@@ -153,4 +156,43 @@ test("public demo uses only synthetic identifiers", () => {
   const uk = createDemoAnalysis("UK");
   assert.equal(uk.summary.ageBuckets.find((bucket) => bucket.bucket === "181-210").charged, false);
   assert.equal(uk.summary.ageBuckets.find((bucket) => bucket.bucket === "241-270").charged, true);
+});
+
+test("forecasts cumulative holding cost and remaining charged inventory", () => {
+  const result = analyzeSources([{
+    fileName: "forecast.csv",
+    sheetName: "Sheet1",
+    type: "inventory",
+    label: "库存报告",
+    rows: [{
+      sku: "DEMO-FORECAST-001",
+      available: 10,
+      sales30: 1,
+      price: 100,
+      referralFee: 15,
+      fulfillmentFee: 10,
+      weight: 0.4,
+      volume: 0.1,
+      sizeTier: "standard",
+      ageMode: "detailed",
+      age: { "181-210": 10 },
+    }],
+  }], "US", { month: 7 });
+  const forecast30 = result.rows[0].forecasts.find((forecast) => forecast.horizonDays === 30);
+  const forecast90 = result.rows[0].forecasts.find((forecast) => forecast.horizonDays === 90);
+  assert.equal(forecast30.expectedSoldUnits, 1);
+  assert.equal(forecast30.remainingUnits, 9);
+  assert.ok(Math.abs(forecast30.baseStorageCost - 0.741) < 1e-9);
+  assert.ok(Math.abs(forecast30.agedSurchargeCost - 0.9) < 1e-9);
+  assert.ok(forecast90.totalHoldingCost > forecast30.totalHoldingCost);
+  assert.equal(forecast90.remainingUnits, 7);
+  assert.equal(forecast30.recommendation.key, "hold");
+  assert.equal(result.summary.forecasts.length, 4);
+});
+
+test("CSV export includes auditable 90-day forecast fields", () => {
+  const result = createDemoAnalysis("US");
+  const csv = exportRowsToCsv(result.rows, result.rule.currency);
+  assert.match(csv, /Hold90TotalHoldingCost_USD/);
+  assert.match(csv, /Hold90Recommendation/);
 });

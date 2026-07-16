@@ -24,6 +24,8 @@ const DETAILED_AGE_BUCKETS = [
   "301-330", "331-365", "366-455", "456+",
 ];
 
+export const FORECAST_HORIZONS = [30, 60, 90, 180];
+
 export function normalizeHeader(value) {
   return String(value ?? "")
     .trim()
@@ -298,6 +300,141 @@ function monthlyStorage(item, rule, month) {
   return item.available * item.volume * rule.storage[item.sizeTier][season];
 }
 
+function bucketStart(bucket) {
+  const parsed = Number(String(bucket).split(/[-+]/)[0]);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function bucketEnd(bucket) {
+  if (String(bucket).includes("+")) return Infinity;
+  const parsed = Number(String(bucket).split("-")[1]);
+  return Number.isFinite(parsed) ? parsed : Infinity;
+}
+
+function agedFeePerUnitAtAge(item, rule, ageDays) {
+  if (!Number.isFinite(item.volume)) return null;
+  const tier = rule.aged.find(([bucket]) => ageDays >= bucketStart(bucket) && ageDays <= bucketEnd(bucket));
+  if (!tier) return 0;
+  const [, volumeRate, unitRate, method] = tier;
+  const volumeFee = item.volume * volumeRate;
+  const perUnitFee = unitRate === null ? 0 : unitRate;
+  return method === "max" ? Math.max(volumeFee, perUnitFee) : volumeFee;
+}
+
+function actionCohorts(item, rule) {
+  if (item.ageMode !== "detailed") return [];
+  return DETAILED_AGE_BUCKETS
+    .map((bucket) => ({ bucket, ageDays: bucketStart(bucket), units: valueOrZero(item.age?.[bucket]) }))
+    .filter((cohort) => cohort.ageDays >= rule.ageStart && cohort.units > 0)
+    .sort((a, b) => b.ageDays - a.ageDays);
+}
+
+function cohortsAfterSales(item, rule, elapsedDays) {
+  const cohorts = actionCohorts(item, rule).map((cohort) => ({ ...cohort }));
+  let sold = Math.min(item.actionUnits, item.sales30 / 30 * elapsedDays);
+  for (const cohort of cohorts) {
+    const deducted = Math.min(cohort.units, sold);
+    cohort.units -= deducted;
+    sold -= deducted;
+  }
+  return cohorts;
+}
+
+function baseStoragePerUnit(item, rule, currentMonth, targetMonth) {
+  const sizeTier = item.sizeTier || "standard";
+  const currentSeason = currentMonth >= 10 ? "octDec" : "janSep";
+  const targetSeason = targetMonth >= 10 ? "octDec" : "janSep";
+  if (item.storageFee > 0 && item.available > 0) {
+    const currentRate = rule.storage[sizeTier][currentSeason];
+    const targetRate = rule.storage[sizeTier][targetSeason];
+    return item.storageFee / item.available * (currentRate > 0 ? targetRate / currentRate : 1);
+  }
+  if (!Number.isFinite(item.volume)) return null;
+  return item.volume * rule.storage[sizeTier][targetSeason];
+}
+
+function recommendScenario(holdValue, liquidateValue, removeCashValue, horizonDays) {
+  const scenarios = [
+    { key: "hold", value: holdValue, label: `继续销售 ${horizonDays} 天，再清算剩余` },
+    { key: "liquidate", value: liquidateValue, label: "立即清算" },
+    { key: "remove", value: removeCashValue, label: "立即移除" },
+  ].filter((scenario) => Number.isFinite(scenario.value));
+  if (scenarios.length < 3) return { key: "pending", label: "补全费用后再比较", value: null };
+  return scenarios.reduce((best, scenario) => scenario.value > best.value ? scenario : best);
+}
+
+function forecastHolding(item, rule, horizonDays, currentMonth) {
+  if (item.actionUnits <= 0) {
+    return {
+      horizonDays, expectedSoldUnits: 0, remainingUnits: 0,
+      baseStorageCost: 0, agedSurchargeCost: 0, totalHoldingCost: 0,
+      normalSaleCash: 0, exitLiquidationNet: 0, holdThenLiquidateValue: 0,
+      recommendation: { key: "none", label: "无需处理", value: 0 },
+    };
+  }
+
+  const periodCount = Math.ceil(horizonDays / 30);
+  const dailySales = item.sales30 / 30;
+  let baseStorageCost = 0;
+  let agedSurchargeCost = 0;
+  let baseReady = true;
+  let agedReady = true;
+  for (let period = 1; period <= periodCount; period += 1) {
+    const startDay = (period - 1) * 30;
+    const endDay = Math.min(horizonDays, period * 30);
+    const periodDays = endDay - startDay;
+    const startUnits = Math.max(0, item.actionUnits - dailySales * startDay);
+    const endUnits = Math.max(0, item.actionUnits - dailySales * endDay);
+    const averageUnits = (startUnits + endUnits) / 2;
+    const targetMonth = ((currentMonth - 1 + period - 1) % 12) + 1;
+    const basePerUnit = baseStoragePerUnit(item, rule, currentMonth, targetMonth);
+    if (Number.isFinite(basePerUnit)) baseStorageCost += averageUnits * basePerUnit * periodDays / 30;
+    else baseReady = false;
+
+    const cohorts = cohortsAfterSales(item, rule, endDay);
+    if (cohorts.length) {
+      for (const cohort of cohorts) {
+        const fee = agedFeePerUnitAtAge(item, rule, cohort.ageDays + endDay);
+        if (Number.isFinite(fee)) agedSurchargeCost += cohort.units * fee * periodDays / 30;
+        else agedReady = false;
+      }
+    } else if (Number.isFinite(item.agedFee) && item.actionUnits > 0) {
+      agedSurchargeCost += item.agedFee / item.actionUnits * endUnits * periodDays / 30;
+    } else {
+      agedReady = false;
+    }
+  }
+
+  const expectedSoldUnits = Math.min(item.actionUnits, dailySales * horizonDays);
+  const remainingUnits = Math.max(0, item.actionUnits - expectedSoldUnits);
+  const totalHoldingCost = baseReady && agedReady ? baseStorageCost + agedSurchargeCost : null;
+  const normalSaleCash = Number.isFinite(item.normalSaleNetPerUnit)
+    ? expectedSoldUnits * item.normalSaleNetPerUnit
+    : null;
+  const liquidationPerUnit = Number.isFinite(item.liquidationNet) && item.actionUnits > 0
+    ? item.liquidationNet / item.actionUnits
+    : null;
+  const exitLiquidationNet = Number.isFinite(liquidationPerUnit) ? remainingUnits * liquidationPerUnit : null;
+  const holdThenLiquidateValue = Number.isFinite(normalSaleCash)
+    && Number.isFinite(exitLiquidationNet)
+    && Number.isFinite(totalHoldingCost)
+    ? normalSaleCash + exitLiquidationNet - totalHoldingCost
+    : null;
+  const removeCashValue = Number.isFinite(item.removalFee) ? -item.removalFee : null;
+  return {
+    horizonDays,
+    expectedSoldUnits,
+    remainingUnits,
+    baseStorageCost: baseReady ? baseStorageCost : null,
+    agedSurchargeCost: agedReady ? agedSurchargeCost : null,
+    totalHoldingCost,
+    normalSaleCash,
+    exitLiquidationNet,
+    holdThenLiquidateValue,
+    recommendation: recommendScenario(holdThenLiquidateValue, item.liquidationNet, removeCashValue, horizonDays),
+  };
+}
+
 function calculateRisk(item, rule) {
   let score = 0;
   if (item.aged > 0) score += 4;
@@ -457,6 +594,7 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
       ? normalized.liquidationNet - normalized.knownProductCost - normalized.knownFirstMileCost
       : null;
     Object.assign(normalized, calculateRisk(normalized, rule));
+    normalized.forecasts = FORECAST_HORIZONS.map((horizonDays) => forecastHolding(normalized, rule, horizonDays, month));
     return normalized;
   });
 
@@ -475,14 +613,44 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
     };
   });
   const ageSnapshot = detailedAgeRows.map((row) => row.ageSnapshot).find((value) => value) || "";
+  const forecasts = FORECAST_HORIZONS.map((horizonDays) => {
+    const rowForecasts = actionRows.map((row) => row.forecasts.find((forecast) => forecast.horizonDays === horizonDays));
+    const sumForecast = (field) => rowForecasts.reduce((total, forecast) => total + (Number.isFinite(forecast?.[field]) ? forecast[field] : 0), 0);
+    const countForecastReady = (field) => rowForecasts.filter((forecast) => Number.isFinite(forecast?.[field])).length;
+    const baseStorageCost = sumForecast("baseStorageCost");
+    const agedSurchargeCost = sumForecast("agedSurchargeCost");
+    const totalHoldingCost = sumForecast("totalHoldingCost");
+    const holdThenLiquidateValue = sumForecast("holdThenLiquidateValue");
+    const complete = actionRows.length > 0 && countForecastReady("holdThenLiquidateValue") === actionRows.length;
+    const recommendation = complete
+      ? recommendScenario(holdThenLiquidateValue, sum("liquidationNet"), -sum("removalFee"), horizonDays)
+      : { key: "pending", label: actionRows.length ? "补全费用后再比较" : "无需处理", value: null };
+    return {
+      horizonDays,
+      expectedSoldUnits: sumForecast("expectedSoldUnits"),
+      remainingUnits: sumForecast("remainingUnits"),
+      baseStorageCost,
+      agedSurchargeCost,
+      totalHoldingCost,
+      holdThenLiquidateValue: complete ? holdThenLiquidateValue : null,
+      recommendation,
+      readiness: {
+        actionSkuCount: actionRows.length,
+        storage: countForecastReady("totalHoldingCost"),
+        comparison: countForecastReady("holdThenLiquidateValue"),
+      },
+    };
+  });
   const warnings = [];
   if (!byType.charge.length) warnings.push("未识别仓储收费报告：重量、体积、仓储费、清算处理费和移除费可能无法完整测算。");
-  if (!byType.age.length) warnings.push("未识别详细库龄报告：UK/DE 的 241–270 天库存无法从合并区间中准确拆分。");
-  if (!byType.commission.length && !byType.products.length) warnings.push("未识别佣金或商品报告：缺少价格的 SKU 无法测算清算预计净回收。");
+  if (!detailedAgeRows.length) warnings.push("未识别详细库龄数据：UK/DE 的 241–270 天库存无法从合并区间中准确拆分。");
+  if (!analyzed.some((row) => row.price > 0)) warnings.push("未识别售价数据：缺少价格的 SKU 无法测算清算预计净回收。");
   if (!analyzed.some((row) => Number.isFinite(row.productCost))) warnings.push("未提供采购成本占售价比例或单件金额：清算预计净回收不能换算为账面损益。");
   if (!analyzed.some((row) => Number.isFinite(row.fulfillmentFee))) warnings.push("未提供 FBA 配送费占售价比例或单件金额：不能计算正常销售单件净回款和完整利润。");
   if (!analyzed.some((row) => Number.isFinite(row.firstMileCost))) warnings.push("未提供头程占售价比例或单件头程：完整利润暂不扣除头程。");
   warnings.push("清算和移除费用仅按进入长期仓储计费区间的库存测算，不按预计冗余库存测算。");
+  warnings.push("继续持有预测仅覆盖当前已进入长期仓储计费区间的库存；按当前 30 天销量线性延续、最老库存优先售出，并按月累计基础仓储费与库存龄附加费。");
+  if (actionRows.some((row) => row.forecasts.some((forecast) => !Number.isFinite(forecast.totalHoldingCost)))) warnings.push("部分计费 SKU 缺少体积或仓储收费数据，继续持有费用为已覆盖部分，不能视为完整预算。");
   warnings.push("未填写移除后回收价值和下游处理成本：移除总损失包含采购成本、头程和 Amazon 移除费，但不参与最终收益比较。");
 
   return {
@@ -504,6 +672,7 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
       liquidationBookProfit: sum("liquidationBookProfit"),
       removalFee: sum("removalFee"),
       removalTotalLoss: sum("removalTotalLoss"),
+      forecasts,
       ageBuckets,
       ageSnapshot,
       riskCounts: {
@@ -565,14 +734,18 @@ export function createDemoAnalysis(marketplace = "US") {
 }
 
 export function exportRowsToCsv(rows, currency) {
-  const headers = ["SKU", "ASIN", "Product", "Risk", "Action", "Available", "Sales30", "DaysSupply", "AgedUnits", "ActionUnits_AgedOnly", "ExcessUnits", `SalePrice_${currency}`, "ProductCostRate", `ProductCost_${currency}`, "FBAFulfillmentFeeRate", `FBAFulfillmentFee_${currency}`, "FirstMileRate", `FirstMileCost_${currency}`, `NormalSaleNetPerUnit_${currency}`, `NormalSaleFullProfitPerUnit_${currency}`, `Storage_${currency}`, `AgedFee_${currency}`, `LiquidationNet_${currency}`, `LiquidationBookProfit_${currency}`, `AmazonRemovalFee_${currency}`, `RemovalTotalLoss_${currency}`];
+  const headers = ["SKU", "ASIN", "Product", "Risk", "Action", "Available", "Sales30", "DaysSupply", "AgedUnits", "ActionUnits_AgedOnly", "ExcessUnits", `SalePrice_${currency}`, "ProductCostRate", `ProductCost_${currency}`, "FBAFulfillmentFeeRate", `FBAFulfillmentFee_${currency}`, "FirstMileRate", `FirstMileCost_${currency}`, `NormalSaleNetPerUnit_${currency}`, `NormalSaleFullProfitPerUnit_${currency}`, `Storage_${currency}`, `AgedFee_${currency}`, `LiquidationNet_${currency}`, `LiquidationBookProfit_${currency}`, `AmazonRemovalFee_${currency}`, `RemovalTotalLoss_${currency}`, "Hold90ExpectedSoldUnits", "Hold90RemainingUnits", `Hold90BaseStorage_${currency}`, `Hold90AgedSurcharge_${currency}`, `Hold90TotalHoldingCost_${currency}`, `Hold90ThenLiquidateValue_${currency}`, "Hold90Recommendation"];
   const escape = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
-  const lines = rows.map((row) => [
-    row.sku, row.asin, row.product, row.risk, row.action, row.available, row.sales30,
+  const lines = rows.map((row) => {
+    const hold90 = row.forecasts.find((forecast) => forecast.horizonDays === 90);
+    return [row.sku, row.asin, row.product, row.risk, row.action, row.available, row.sales30,
     row.daysSupply, row.aged, row.actionUnits, row.excess, row.price, row.productCostRate, row.productCost,
     row.fulfillmentFeeRate, row.fulfillmentFee, row.firstMileRate, row.firstMileCost,
     row.normalSaleNetPerUnit, row.normalSaleFullProfitPerUnit,
     row.storageEstimate, row.agedFee, row.liquidationNet, row.liquidationBookProfit, row.removalFee, row.removalTotalLoss,
-  ].map(escape).join(","));
+    hold90.expectedSoldUnits, hold90.remainingUnits, hold90.baseStorageCost, hold90.agedSurchargeCost,
+    hold90.totalHoldingCost, hold90.holdThenLiquidateValue, hold90.recommendation.label,
+  ].map(escape).join(",");
+  });
   return ["\ufeff" + headers.join(","), ...lines].join("\r\n");
 }
