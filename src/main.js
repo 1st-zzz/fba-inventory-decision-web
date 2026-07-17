@@ -179,7 +179,7 @@ root.innerHTML = `
       <details class="method-panel"><summary><span>规则、口径与执行边界</span><small>展开查看计算假设与官方收费标准</small></summary><div class="method-body">
         <div class="method-explanation"><p>推荐比较的是未来现金：正常销售净回款 + 期末清算回收 − 新增仓储费。移除因缺少回收价值与下游成本，只展示费用，不参与推荐。采购成本与头程为内部估算占比，没有 Amazon 官方统一费率；销售佣金和 FBA 配送费以上传报告为优先。</p><div class="source-version"><span id="source-marketplace"></span><b id="source-version"></b></div></div>
         <div class="method-warnings"><h3>执行前检查</h3><ul id="warning-list"></ul></div>
-        <section class="fee-source-section"><div class="fee-source-head"><div><p class="eyebrow">OFFICIAL FEE SOURCES</p><h3>各项收费标准与官方链接</h3></div><p>按当前站点显示；点击卡片查看 Amazon 原始规则。</p></div><div id="fee-source-list" class="fee-source-list"></div></section>
+        <section class="fee-source-section"><div class="fee-source-head"><div><p class="eyebrow">OFFICIAL FEE SOURCES</p><h3>各项收费标准与官方链接</h3></div><p>仅使用 Amazon 官方页面；Seller Central Help 可能要求登录。</p></div><div id="fee-source-list" class="fee-source-list"></div></section>
       </div></details>
     </section>
   </main>

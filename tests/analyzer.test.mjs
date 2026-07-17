@@ -16,6 +16,9 @@ test("every marketplace exposes official links for all calculated fee types", ()
     const sources = MARKET_RULES[marketplace].feeSources;
     assert.deepEqual(sources.map((source) => source.key).sort(), expectedKeys);
     assert.ok(sources.every((source) => source.label && source.note && /^https:\/\//.test(source.url)));
+    assert.ok(sources.every((source) => !source.url.includes("seller-forums")));
+    assert.ok(sources.every((source) => /^https:\/\/(sell\.amazon\.(com|ca|co\.uk|de)|sellercentral\.amazon\.(com|ca)|m\.media-amazon\.com)\//.test(source.url)));
+    assert.ok(!MARKET_RULES[marketplace].sourceUrl.includes("seller-forums"));
   }
 });
 
