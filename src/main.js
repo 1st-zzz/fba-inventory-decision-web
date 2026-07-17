@@ -98,6 +98,30 @@ root.innerHTML = `
           <p class="privacy-note">文件只在当前浏览器处理。采购成本和头程仅用于账面损益，不会在未来现金推荐中重复扣除。</p>
         </div>
       </div>
+      <details class="report-source-guide">
+        <summary><span><b>这些输入文件从哪里下载？</b><small>Seller Central 获取路径与脱敏截图</small></span><em>点击展开</em></summary>
+        <div class="source-guide-body">
+          <p class="source-guide-note">以下路径来自 Amazon Seller Central。不同站点或新版界面的菜单名称可能略有差异；截图已移除店铺名称、浏览器地址和真实 SKU 数据。</p>
+          <div class="source-guide-grid">
+            <details class="source-guide-card">
+              <summary><span class="source-order">01</span><span><b>库存报告</b><small>报告 → 配送 → 亚马逊物流库存 → 请求下载 .csv 文件</small></span><em>查看截图</em></summary>
+              <figure><img src="./report-sources/amazon-fulfilled-inventory-download.jpg" loading="lazy" alt="Seller Central 亚马逊物流库存报告与 CSV 下载入口" /><figcaption>文件来源：Seller Central 自定义报告生成器中的“亚马逊物流库存”。选择“请求下载 .csv 文件”，等待报告状态变为可下载。</figcaption></figure>
+            </details>
+            <details class="source-guide-card">
+              <summary><span class="source-order">02</span><span><b>库龄报告</b><small>库存 → 分析 → 亚马逊物流分析 → 库龄和冗余数量</small></span><em>查看截图</em></summary>
+              <figure><img src="./report-sources/fba-inventory-age-analysis.jpg" loading="lazy" alt="Seller Central 亚马逊物流分析中的库存库龄区间" /><figcaption>文件来源：Seller Central“亚马逊物流分析”的库龄和冗余数量页面。用于核对 0–180、181–210、211–240 等库龄区间；需要完整 SKU 文件时，按页面提示进入“亚马逊物流库存”并请求 CSV。</figcaption></figure>
+            </details>
+            <details class="source-guide-card">
+              <summary><span class="source-order">03</span><span><b>仓储收费报告</b><small>报告中心 → 付款 → 月度仓储费 → 请求下载 .csv 文件</small></span><em>查看截图</em></summary>
+              <figure><img src="./report-sources/monthly-storage-fees-download.jpg" loading="lazy" alt="Seller Central 月度仓储费报告与下载入口" /><figcaption>文件来源：Seller Central 报告中心的“月度仓储费”。选择月份后请求 CSV，待报告生成后点击“下载”。</figcaption></figure>
+            </details>
+            <details class="source-guide-card">
+              <summary><span class="source-order">04</span><span><b>销售佣金预览报告与所有商品报告</b><small>库存报告 → 请求库存报告 → 选择报告类型</small></span><em>查看截图</em></summary>
+              <figure><img src="./report-sources/report-center-report-selection.jpg" loading="lazy" alt="Seller Central 库存报告类型选择菜单" /><figcaption>文件来源：Seller Central“库存报告”的“请求库存报告”下拉菜单。选择“销售佣金预览报告”或“所有商品报告”；销售佣金预览报告与“销售佣金折扣报告”不是同一份文件，请勿误选。</figcaption></figure>
+            </details>
+          </div>
+        </div>
+      </details>
     </section>
 
     <section class="workspace" id="inventory-overview">
