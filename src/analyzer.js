@@ -19,7 +19,7 @@ const recognizedHeaders = new Set([
   "fulfillment-fee-per-unit", "fulfillment-fee-rate", "first-mile-cost-rate",
 ]);
 
-const DETAILED_AGE_BUCKETS = [
+export const DETAILED_AGE_BUCKETS = [
   "0-180", "181-210", "211-240", "241-270", "271-300",
   "301-330", "331-365", "366-455", "456+",
 ];

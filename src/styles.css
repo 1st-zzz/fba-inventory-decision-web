@@ -232,6 +232,20 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .age-note { line-height: 1.55; }
 .age-empty { grid-column: 1 / -1; padding: 16px; color: var(--muted); background: #f4f7f4; text-align: center; font-size: 11px; }
 
+.inventory-detail-panel { margin-top: 14px; overflow: hidden; border: 1px solid var(--line); border-radius: 11px; background: white; }
+.inventory-detail-head { padding: 16px 18px; display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; }
+.inventory-detail-head h2 { margin: 0; font-size: 21px; letter-spacing: -.03em; }
+.inventory-detail-head p:last-child { margin: 6px 0 0; color: var(--muted); font-size: 9px; }
+.inventory-detail-head input { width: min(310px, 100%); padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: #f8faf9; font-size: 10px; }
+.inventory-table { min-width: 1880px; }
+.inventory-table th:not(:first-child), .inventory-table td:not(:first-child) { text-align: right; }
+.inventory-table th:first-child, .inventory-table td:first-child { position: sticky; left: 0; z-index: 1; background: white; }
+.inventory-table th:first-child { z-index: 2; background: #edf3f1; }
+.inventory-table tr.aged-row td { background: #fffaf2; }
+.inventory-table tr.aged-row td:first-child { background: #fffaf2; }
+.inventory-table td:nth-child(6) { color: #a35f1d; background: #fff7ea; }
+.inventory-detail-note { margin: 0; padding: 10px 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 9px; }
+
 .table-panel { margin-top: 14px; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: white; box-shadow: var(--shadow); scroll-margin-top: 18px; }
 .table-head { padding: 21px; }
 .table-head h2 { font-size: 24px; }
@@ -289,7 +303,7 @@ footer p { margin: 0; }
   .header-meta { justify-content: flex-start; }
   .intake-panel, .workspace { width: calc(100% - 28px); }
   .intake-panel { padding: 18px; }
-  .section-heading, .workspace-heading, .table-head, .decision-panel-head, .subsection-head, .age-panel-head { align-items: stretch; flex-direction: column; }
+  .section-heading, .workspace-heading, .table-head, .decision-panel-head, .subsection-head, .age-panel-head, .inventory-detail-head { align-items: stretch; flex-direction: column; }
   .control-strip { grid-template-columns: 1fr 1fr; }
   .field-grid.three { grid-template-columns: 1fr; }
   .workspace { padding-top: 38px; }

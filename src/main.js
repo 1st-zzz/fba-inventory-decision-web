@@ -2,6 +2,7 @@ import "./styles.css";
 import {
   analyzeSources,
   createDemoAnalysis,
+  DETAILED_AGE_BUCKETS,
   exportRowsToCsv,
   FORECAST_HORIZONS,
   workbookToSources,
@@ -14,6 +15,7 @@ let parsedSources = [];
 let selectedFiles = [];
 let current = createDemoAnalysis("US", { analysisDate: today });
 let usingDemo = true;
+let inventoryQuery = "";
 let query = "";
 let riskFilter = "全部";
 let actionFilter = "all";
@@ -113,6 +115,18 @@ root.innerHTML = `
         <section class="age-panel">
           <div class="age-panel-head"><div><p class="eyebrow">AGED INVENTORY BUCKETS</p><h2>各库龄区间库存</h2></div><p id="age-coverage"></p></div>
           <div class="age-panel-body"><div id="age-bucket-grid" class="age-bucket-grid"></div><p class="age-note">库存件数来自最新库龄快照。橙色区间表示当前站点已进入长期仓储计费范围。</p></div>
+        </section>
+
+        <section class="inventory-detail-panel">
+          <div class="inventory-detail-head">
+            <div><p class="eyebrow">SKU INVENTORY DETAIL</p><h2>每个 SKU 的库存明细</h2><p id="inventory-table-count"></p></div>
+            <input id="inventory-search-input" type="search" placeholder="搜索 SKU / ASIN / 商品" aria-label="搜索库存明细" />
+          </div>
+          <div class="table-scroll"><table class="inventory-table"><thead><tr>
+            <th>SKU / 商品</th><th>可售</th><th>调拨中</th><th>30日销量</th><th>预计冗余</th><th>长期计费</th>
+            <th>0–180天</th><th>181–210天</th><th>211–240天</th><th>241–270天</th><th>271–300天</th><th>301–330天</th><th>331–365天</th><th>366–455天</th><th>456天以上</th>
+          </tr></thead><tbody id="inventory-table-body"></tbody></table></div>
+          <p class="inventory-detail-note">“—”表示该 SKU 未识别到详细库龄区间；长期计费库存仍按当前站点规则计算。</p>
         </section>
       </section>
 
@@ -410,6 +424,16 @@ function render() {
   document.querySelector("#age-coverage").textContent = summary.readiness.detailedAge ? `明细覆盖 ${number(summary.readiness.detailedAge)}/${number(summary.skuCount)} 个 SKU${summary.ageSnapshot ? ` · 快照 ${dateLabel(summary.ageSnapshot)}` : ""}` : "未识别详细库龄报告";
   document.querySelector("#age-bucket-grid").innerHTML = summary.readiness.detailedAge ? ageBuckets.map((bucket) => `<article class="age-bucket ${bucket.charged ? "charged" : "not-charged"} ${bucket.units === 0 ? "zero" : ""}"><div><b>${escapeHtml(bucket.bucket)} 天</b><span>${bucket.charged ? "计费" : "未计费"}</span></div><strong>${number(bucket.units)}<small> 件</small></strong><p>${number(bucket.skuCount)} 个 SKU</p></article>`).join("") : `<div class="age-empty">上传详细库龄报告后显示每个收费区间的库存件数。</div>`;
 
+  const inventorySearch = inventoryQuery.toLowerCase();
+  const inventoryRows = current.rows
+    .filter((row) => !inventorySearch || [row.sku, row.asin, row.product].some((value) => String(value || "").toLowerCase().includes(inventorySearch)))
+    .sort((a, b) => b.actionUnits - a.actionUnits || b.available - a.available || String(a.sku).localeCompare(String(b.sku)));
+  document.querySelector("#inventory-table-body").innerHTML = inventoryRows.map((row) => {
+    const ageCells = DETAILED_AGE_BUCKETS.map((bucket) => `<td>${row.ageMode === "detailed" ? number(row.age?.[bucket]) : "—"}</td>`).join("");
+    return `<tr class="${row.actionUnits > 0 ? "aged-row" : ""}"><td><b>${escapeHtml(row.sku)}</b><span>${escapeHtml(row.asin)}</span><small>${escapeHtml(row.product)}</small></td><td>${number(row.available)}</td><td>${number(row.transfer)}</td><td>${number(row.sales30)}</td><td>${number(row.excess)}</td><td><b>${number(row.actionUnits)}</b></td>${ageCells}</tr>`;
+  }).join("");
+  document.querySelector("#inventory-table-count").textContent = `显示 ${number(inventoryRows.length)}/${number(summary.skuCount)} 个 SKU · 长期计费 SKU 优先排列`;
+
   const rows = filteredRows();
   document.querySelector("#table-body").innerHTML = rows.map((row) => {
     const itemForecast = rowForecast(row);
@@ -485,6 +509,7 @@ marketplace.addEventListener("change", () => { if (!usingDemo && selectedFiles.l
 analysisDateInput.addEventListener("change", recalculate);
 for (const input of [productCostRateInput, fulfillmentFeeRateInput, firstMileRateInput]) input.addEventListener("change", recalculate);
 document.querySelector("#horizon-buttons").addEventListener("click", (event) => { const button = event.target.closest("button[data-horizon]"); if (!button) return; selectedHorizon = Number(button.dataset.horizon); render(); });
+document.querySelector("#inventory-search-input").addEventListener("input", (event) => { inventoryQuery = event.target.value.trim(); render(); });
 document.querySelector("#search-input").addEventListener("input", (event) => { query = event.target.value.trim(); render(); });
 document.querySelector("#risk-filter").addEventListener("change", (event) => { riskFilter = event.target.value; render(); });
 document.querySelector("#action-filter").addEventListener("change", (event) => { actionFilter = event.target.value; render(); });
