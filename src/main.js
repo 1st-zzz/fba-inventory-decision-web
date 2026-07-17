@@ -132,25 +132,23 @@ root.innerHTML = `
 
       <section class="decision-panel" id="fee-calculation">
         <div class="decision-panel-head">
-          <div><p class="eyebrow">STEP 03 · CALCULATE</p><h2>费用测算与处置比较</h2><p class="section-note">先看当前处置费用，再看继续放置不同阶段会增加多少仓储费。</p></div>
+          <div><p class="eyebrow">STEP 03 · CALCULATE</p><h2>当前费用与继续放置成本</h2><p class="section-note">先分别看“本月继续存、现在清算、现在移除”三笔账，再比较继续放置不同阶段的累计成本。</p></div>
           <div class="horizon-control" aria-label="选择继续持有天数"><span>选择继续放置阶段</span><div id="horizon-buttons"></div></div>
         </div>
         <div id="decision-scope" class="decision-scope"></div>
         <div id="fee-summary-grid" class="fee-summary-grid"></div>
 
         <section class="support-panel forecast-panel cost-forecast-panel">
-          <div class="subsection-head"><div><p class="eyebrow">HOLDING COST BY STAGE</p><h3>继续放置各阶段仓储费</h3></div><b id="forecast-coverage"></b></div>
+          <div class="subsection-head"><div><p class="eyebrow">HOLDING COST BY STAGE</p><h3>继续放置后，累计要再付多少</h3></div><b id="forecast-coverage"></b></div>
           <p id="forecast-summary" class="forecast-summary"></p>
           <div id="forecast-chart" class="forecast-chart"></div>
-          <div class="forecast-legend"><span class="base-dot"></span>基础仓储费 <span class="aged-dot"></span>库存龄附加费</div>
           <div id="forecast-driver" class="forecast-driver"></div>
         </section>
 
-        <div class="decision-section-label"><p class="eyebrow">ACTION COMPARISON</p><h3>继续销售还是现在清算</h3></div>
+        <div class="decision-section-label"><p class="eyebrow">ACTION COMPARISON</p><h3>算完以后，怎么处理</h3></div>
         <div id="recommendation-banner" class="recommendation-banner"></div>
         <div id="scenario-grid" class="scenario-grid"></div>
         <div id="decision-reason" class="decision-reason"></div>
-        <div id="removal-reference" class="removal-reference"></div>
 
         <section class="support-panel sensitivity-panel">
           <div class="subsection-head"><div><p class="eyebrow">SALES CHECK</p><h3>销量变动会改变结论吗？</h3></div><p>按最近30日销量上下浮动30%</p></div>
@@ -277,10 +275,6 @@ function metric(label, value, note, tone = "") {
   return `<article class="metric ${tone}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(note)}</small></article>`;
 }
 
-function feeMetric(label, value, note, tone = "") {
-  return `<article class="fee-metric ${tone}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(note)}</small></article>`;
-}
-
 function confidenceModel(summary, forecast) {
   if (!summary.actionUnits) return { level: "无需处理", tone: "neutral", note: "当前没有进入计费区间的库存" };
   const completeComparison = forecast.readiness.comparison === forecast.readiness.actionSkuCount;
@@ -339,14 +333,13 @@ function render() {
 
   const fullRemovalLoss = summary.readiness.actionSkuCount > 0 && summary.readiness.removalLoss === summary.readiness.actionSkuCount;
   const removalTotalLoss = summary.actionUnits <= 0 ? "无计费库存" : fullRemovalLoss ? money(summary.removalTotalLoss) : `待补 ${number(summary.readiness.actionSkuCount - summary.readiness.removalLoss)} 个 SKU`;
-  document.querySelector("#fee-summary-grid").innerHTML = [
-    feeMetric("当前月基础仓储费", money(summary.storage), `全部 ${number(summary.available)} 件库存`),
-    feeMetric("当前月长期仓储费", money(summary.agedFee), `${rule.marketplace} 从 ${rule.ageStart} 天起`, "warning"),
-    feeMetric("清算费用", money(summary.liquidationFee), `转介费 ${money(summary.liquidationReferral)} + 处理费 ${money(summary.liquidationProcessing)}`),
-    feeMetric("清算预计净回收", money(summary.liquidationNet), `毛回收 ${money(summary.liquidationGross)} − 清算费用`, "warning"),
-    feeMetric("Amazon 移除费", money(summary.removalFee), "费用金额以正数显示"),
-    feeMetric("移除总损失", removalTotalLoss, "含采购成本、头程与移除费", "danger"),
-  ].join("");
+  const currentStorageTotal = summary.storage + summary.agedFee;
+  const removalLossAbsolute = fullRemovalLoss ? money(Math.abs(summary.removalTotalLoss)) : "待补数据";
+  document.querySelector("#fee-summary-grid").innerHTML = `
+    <article class="cost-path-card storage-path"><div class="cost-path-head"><span>账一</span><b>本月继续存</b></div><p>本月仓储费合计</p><h3>${money(currentStorageTotal)}</h3><div class="cost-equation"><span>基础仓储费<b>${money(summary.storage)}</b></span><i>＋</i><span>长期仓储附加费<b>${money(summary.agedFee)}</b></span><i>＝</i><strong>${money(currentStorageTotal)}</strong></div><small>基础仓储费按全部 ${number(summary.available)} 件可售库存；长期附加费按计费库龄库存。</small></article>
+    <article class="cost-path-card liquidation-path"><div class="cost-path-head"><span>账二</span><b>现在清算</b></div><p>预计现在可收回现金</p><h3>${money(summary.liquidationNet)}</h3><div class="cost-equation"><span>清算毛回收<b>${money(summary.liquidationGross)}</b></span><i>－</i><span>清算费用<b>${money(summary.liquidationFee)}</b></span><i>＝</i><strong>${money(summary.liquidationNet)}</strong></div><dl><div><dt>清算费用拆分</dt><dd>转介费 ${money(summary.liquidationReferral)} ＋ 处理费 ${money(summary.liquidationProcessing)}</dd></div></dl><small>净回收是未来现金；采购成本和头程只在账面损益中另行体现。</small></article>
+    <article class="cost-path-card removal-path"><div class="cost-path-head"><span>账三</span><b>现在移除</b></div><p>预计移除总损失</p><h3>${removalTotalLoss}</h3><div class="cost-equation"><span>采购成本<b>${fullRemovalLoss ? money(summary.knownProductCost) : "待补"}</b></span><i>＋</i><span>头程<b>${fullRemovalLoss ? money(summary.knownFirstMileCost) : "待补"}</b></span><i>＋</i><span>Amazon移除费<b>${money(summary.removalFee)}</b></span><i>＝</i><strong>${removalLossAbsolute}</strong></div><small>总损失用负数表示；因缺少移除后回收价值，不参与最终推荐。</small></article>
+  `;
 
   document.querySelector("#horizon-buttons").innerHTML = FORECAST_HORIZONS.map((days) => `<button type="button" data-horizon="${days}" class="${days === selectedHorizon ? "active" : ""}">${days} 天</button>`).join("");
 
@@ -395,8 +388,6 @@ function render() {
       ? `继续销售 ${selectedHorizon} 天预计售出 ${number(forecast.expectedSoldUnits)} 件，即使计入 ${money(forecast.totalHoldingCost)} 仓储费，仍比现在清算多保留 ${money(decisionDifference)} 现金。`
       : `两种方案只完成 ${number(forecast.readiness.comparison)}/${number(forecast.readiness.actionSkuCount)} 个计费 SKU 的比较，请先补全售价、佣金或 FBA 配送费。`;
   document.querySelector("#decision-reason").innerHTML = `<b>为什么：</b>${escapeHtml(reasonText)}`;
-  document.querySelector("#removal-reference").innerHTML = `<div><b>移除费用参考（不参与建议）</b><span>缺少移除后的回收价值和下游处理成本，不能与清算直接比较。</span></div><dl><div><dt>Amazon 移除费</dt><dd>${money(summary.removalFee)}</dd></div><div><dt>含采购与头程的总损失</dt><dd>${removalTotalLoss}</dd></div></dl>`;
-
   const sensitivityKeys = forecast.sensitivity.map((scenario) => scenario.recommendation.key);
   const sensitivityStable = sensitivityKeys.length > 0 && sensitivityKeys.every((key) => key === sensitivityKeys[0]) && sensitivityKeys[0] !== "pending";
   const sensitivityRecommendation = sensitivityKeys[0] === "liquidate" ? "现在清算" : sensitivityKeys[0] === "hold" ? `继续销售 ${selectedHorizon} 天` : "待补数据";
@@ -407,14 +398,11 @@ function render() {
     <article class="sensitivity-item ${scenario.key === "baseline" ? "baseline" : ""}"><div><span>销量 ${scenario.multiplier === 1 ? "不变" : scenario.multiplier < 1 ? "下降 30%" : "提高 30%"}</span><b>${scenario.recommendation.key === "liquidate" ? "现在清算" : scenario.recommendation.key === "hold" ? `继续销售 ${selectedHorizon} 天` : "待补数据"}</b></div><small>继续销售后的现金结果 ${moneyOrPending(scenario.holdThenLiquidateValue)}</small></article>
   `).join("");
 
-  const maxForecastCost = Math.max(1, ...summary.forecasts.map((item) => item.totalHoldingCost || 0));
   document.querySelector("#forecast-coverage").textContent = `费用覆盖 ${number(forecast.readiness.storage)}/${number(forecast.readiness.actionSkuCount)} 个计费 SKU`;
-  document.querySelector("#forecast-summary").innerHTML = `继续放 <b>${selectedHorizon} 天</b>，预计累计新增 <strong>${money(forecast.totalHoldingCost)}</strong> 仓储费。`;
-  document.querySelector("#forecast-chart").innerHTML = summary.forecasts.map((item) => {
-    const baseWidth = Math.max(0, item.baseStorageCost / maxForecastCost * 100);
-    const agedWidth = Math.max(0, item.agedSurchargeCost / maxForecastCost * 100);
-    return `<article class="forecast-row ${item.horizonDays === selectedHorizon ? "active" : ""}"><div class="forecast-label"><b>${item.horizonDays} 天</b><span>剩余 ${number(item.remainingUnits)} 件</span></div><div class="forecast-bar" aria-label="${item.horizonDays} 天累计新增仓储费 ${money(item.totalHoldingCost)}"><span class="base" style="width:${baseWidth}%"></span><span class="aged" style="width:${agedWidth}%"></span></div><div class="forecast-cost"><strong>${money(item.totalHoldingCost)}</strong><small>基础 ${money(item.baseStorageCost)} + 长期 ${money(item.agedSurchargeCost)}</small></div></article>`;
-  }).join("");
+  document.querySelector("#forecast-summary").innerHTML = `选择继续放 <b>${selectedHorizon} 天</b>：从现在到该阶段，预计累计再付 <strong>${money(forecast.totalHoldingCost)}</strong>。这是累计金额，不是单月费用。`;
+  document.querySelector("#forecast-chart").innerHTML = summary.forecasts.map((item) => `
+    <article class="forecast-stage-card ${item.horizonDays === selectedHorizon ? "active" : ""}"><div><span>继续放置</span><b>${item.horizonDays} 天</b></div><p>累计新增仓储费</p><h4>${money(item.totalHoldingCost)}</h4><dl><div><dt>其中基础仓储费</dt><dd>${money(item.baseStorageCost)}</dd></div><div><dt>其中长期附加费</dt><dd>${money(item.agedSurchargeCost)}</dd></div><div><dt>预计到期仍剩</dt><dd>${number(item.remainingUnits)} 件</dd></div></dl></article>
+  `).join("");
   const forecast90 = summary.forecasts.find((item) => item.horizonDays === 90);
   const forecast180 = summary.forecasts.find((item) => item.horizonDays === 180);
   const addedAfter90 = forecast180.totalHoldingCost - forecast90.totalHoldingCost;

@@ -732,6 +732,8 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
       liquidationFee: sum("liquidationFee"),
       liquidationNet: sum("liquidationNet"),
       liquidationBookProfit: sum("liquidationBookProfit"),
+      knownProductCost: sum("knownProductCost"),
+      knownFirstMileCost: sum("knownFirstMileCost"),
       removalFee: sum("removalFee"),
       removalTotalLoss: sum("removalTotalLoss"),
       forecasts,
