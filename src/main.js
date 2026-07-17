@@ -176,7 +176,11 @@ root.innerHTML = `
         <p id="table-count" class="table-count"></p>
       </section>
 
-      <details class="method-panel"><summary><span>规则、口径与执行边界</span><small>展开查看计算假设与费率来源</small></summary><div class="method-body"><div><p>推荐比较的是未来现金：正常销售净回款 + 期末清算回收 − 新增仓储费。移除因缺少回收价值与下游成本，只展示费用，不参与推荐。</p><a id="rule-source" target="_blank" rel="noreferrer">查看 Amazon 费率来源</a></div><ul id="warning-list"></ul></div></details>
+      <details class="method-panel"><summary><span>规则、口径与执行边界</span><small>展开查看计算假设与官方收费标准</small></summary><div class="method-body">
+        <div class="method-explanation"><p>推荐比较的是未来现金：正常销售净回款 + 期末清算回收 − 新增仓储费。移除因缺少回收价值与下游成本，只展示费用，不参与推荐。采购成本与头程为内部估算占比，没有 Amazon 官方统一费率；销售佣金和 FBA 配送费以上传报告为优先。</p><div class="source-version"><span id="source-marketplace"></span><b id="source-version"></b></div></div>
+        <div class="method-warnings"><h3>执行前检查</h3><ul id="warning-list"></ul></div>
+        <section class="fee-source-section"><div class="fee-source-head"><div><p class="eyebrow">OFFICIAL FEE SOURCES</p><h3>各项收费标准与官方链接</h3></div><p>按当前站点显示；点击卡片查看 Amazon 原始规则。</p></div><div id="fee-source-list" class="fee-source-list"></div></section>
+      </div></details>
     </section>
   </main>
 
@@ -330,8 +334,15 @@ function render() {
   document.querySelector("#result-title").textContent = usingDemo ? "脱敏演示 · 库存概况" : "上传数据 · 库存概况";
   document.querySelector("#result-context").textContent = `测算起始日 ${current.analysisDate} · ${rule.marketplace} · ${rule.currency}${summary.ageSnapshot ? ` · 库龄快照 ${dateLabel(summary.ageSnapshot)}` : ""}`;
   document.querySelector("#rule-version").textContent = `${rule.version} · 生效 ${rule.effectiveFrom}`;
-  document.querySelector("#rule-source").href = rule.sourceUrl;
-  document.querySelector("#rule-source").textContent = `${rule.sourceLabel} ↗`;
+  document.querySelector("#source-marketplace").textContent = `${rule.marketplace} · ${rule.currency}`;
+  document.querySelector("#source-version").textContent = `${rule.version} · 生效 ${rule.effectiveFrom}`;
+  document.querySelector("#fee-source-list").innerHTML = rule.feeSources.map((source) => `
+    <a class="fee-source-card fee-source-${escapeHtml(source.key)}" href="${escapeHtml(source.url)}" target="_blank" rel="noreferrer">
+      <span>${escapeHtml(source.label)}</span>
+      <p>${escapeHtml(source.note)}</p>
+      <b>查看官方收费标准 <i aria-hidden="true">↗</i></b>
+    </a>
+  `).join("");
 
   const reports = current.reports.filter((report) => report.type !== "unknown");
   document.querySelector("#report-strip").innerHTML = reports.map((report) => `<span><b>${escapeHtml(report.label)}</b>${number(report.rowCount)} 行<small>${escapeHtml(report.fileName)}</small></span>`).join("");

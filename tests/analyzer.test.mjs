@@ -8,6 +8,16 @@ import {
   exportRowsToCsv,
   workbookToSources,
 } from "../src/analyzer.js";
+import { MARKET_RULES } from "../src/rules.js";
+
+test("every marketplace exposes official links for all calculated fee types", () => {
+  const expectedKeys = ["aged", "fulfillment", "liquidation", "referral", "removal", "storage"];
+  for (const marketplace of ["US", "CA", "UK", "DE"]) {
+    const sources = MARKET_RULES[marketplace].feeSources;
+    assert.deepEqual(sources.map((source) => source.key).sort(), expectedKeys);
+    assert.ok(sources.every((source) => source.label && source.note && /^https:\/\//.test(source.url)));
+  }
+});
 
 test("detects the six supported report types", () => {
   assert.equal(detectReportType(["sku", "available", "units-shipped-t30"]), "inventory");

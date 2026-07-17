@@ -269,12 +269,27 @@ tbody tr:hover { background: #f7faf9; }
 .method-panel > summary { padding: 16px 20px; display: flex; justify-content: space-between; gap: 20px; cursor: pointer; font-size: 13px; font-weight: 800; }
 .method-panel > summary small { color: #9ebdba; font-size: 9px; font-weight: 600; }
 .method-panel[open] > summary { border-bottom: 1px solid rgba(255,255,255,.12); }
-.method-body { padding: 18px 20px; display: grid; grid-template-columns: .8fr 1.2fr; gap: 32px; }
-.method-body > div > p { margin-top: 0; color: #c5d9d6; font-size: 11px; line-height: 1.7; }
-.method-panel a { color: #83d9c7; font-size: 10px; font-weight: 800; }
+.method-body { padding: 20px; display: grid; grid-template-columns: .85fr 1.15fr; gap: 22px 32px; }
+.method-explanation > p { margin: 0; color: #c5d9d6; font-size: 11px; line-height: 1.7; }
+.source-version { margin-top: 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.source-version span, .source-version b { padding: 5px 8px; border: 1px solid rgba(255,255,255,.14); border-radius: 999px; font-size: 8px; }
+.source-version span { color: #8fe0d0; background: rgba(91,205,182,.1); }
+.source-version b { color: #c5d9d6; font-weight: 700; }
+.method-warnings h3, .fee-source-head h3 { margin: 0; font-size: 14px; }
 .method-panel ul { margin: 0; padding: 0; list-style: none; }
 .method-panel li { position: relative; padding: 9px 0 9px 20px; border-bottom: 1px solid rgba(255,255,255,.1); color: #c5d9d6; font-size: 10px; line-height: 1.55; }
 .method-panel li::before { content: ""; position: absolute; left: 0; top: 14px; width: 7px; height: 7px; border-radius: 50%; background: #66cbb6; }
+.fee-source-section { grid-column: 1 / -1; padding-top: 20px; border-top: 1px solid rgba(255,255,255,.12); }
+.fee-source-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; }
+.fee-source-head .eyebrow { color: #65cbb7; }
+.fee-source-head > p { margin: 0; color: #8faeab; font-size: 9px; }
+.fee-source-list { margin-top: 13px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
+.fee-source-card { min-width: 0; padding: 14px; display: block; border: 1px solid rgba(255,255,255,.13); border-radius: 9px; color: white; background: rgba(255,255,255,.045); text-decoration: none; transition: border-color .18s ease, background .18s ease, transform .18s ease; }
+.fee-source-card:hover { border-color: #66cbb6; background: rgba(102,203,182,.1); transform: translateY(-1px); }
+.fee-source-card > span { color: #eaf7f4; font-size: 11px; font-weight: 900; }
+.fee-source-card > p { min-height: 30px; margin: 7px 0 12px; color: #9ebdba; font-size: 9px; line-height: 1.55; }
+.fee-source-card > b { color: #83d9c7; font-size: 9px; }
+.fee-source-card i { margin-left: 3px; font-style: normal; }
 footer { padding: 22px 5vw; display: flex; justify-content: space-between; gap: 24px; color: #8faeab; background: #082729; font-size: 10px; }
 footer span { color: white; font-weight: 900; }
 footer p { margin: 0; }
@@ -318,6 +333,9 @@ footer p { margin: 0; }
   .sensitivity-grid { grid-template-columns: 1fr; }
   .filters { width: 100%; grid-template-columns: 1fr; }
   .method-body { grid-template-columns: 1fr; gap: 18px; }
+  .fee-source-section { grid-column: auto; }
+  .fee-source-list { grid-template-columns: 1fr 1fr; }
+  .fee-source-head { align-items: flex-start; flex-direction: column; gap: 7px; }
   footer { flex-direction: column; }
 }
 
@@ -328,4 +346,5 @@ footer p { margin: 0; }
   .result-actions { align-items: stretch; flex-direction: column; }
   .cost-equation { flex-wrap: wrap; }
   .cost-equation span, .cost-equation > strong { flex-basis: 40%; }
+  .fee-source-list { grid-template-columns: 1fr; }
 }
