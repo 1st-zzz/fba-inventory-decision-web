@@ -131,10 +131,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .decision-panel { margin-top: 18px; padding: 22px; border: 1px solid #c8ddd8; border-radius: 14px; background: white; box-shadow: 0 12px 36px rgba(18,55,54,.07); scroll-margin-top: 18px; }
 .decision-panel-head h2 { font-size: 28px; }
 .section-note { max-width: 620px; margin: 7px 0 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
-.horizon-control { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 10px; font-weight: 800; }
-.horizon-control > div { display: flex; padding: 4px; border-radius: 9px; background: #e7efec; }
-.horizon-control button { padding: 8px 10px; border: 0; border-radius: 6px; color: #57706e; background: transparent; cursor: pointer; font-size: 10px; font-weight: 800; }
-.horizon-control button.active { color: white; background: var(--teal); }
 .fee-summary-grid { margin-top: 12px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .cost-path-card { min-width: 0; padding: 17px; border: 1px solid var(--line); border-radius: 11px; background: #f8faf9; }
 .cost-path-card.liquidation-path { border-color: #9bcfc5; background: #f0faf7; }
@@ -190,15 +186,17 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .forecast-panel { margin-top: 0; }
 .subsection-head h3 { margin: 0; font-size: 20px; }
 .subsection-head > p { max-width: 430px; margin: 0; color: var(--muted); text-align: right; font-size: 10px; line-height: 1.55; }
-.sensitivity-item { padding: 11px; border: 1px solid var(--line); border-radius: 8px; background: white; }
-.sensitivity-item.baseline { border-color: #86c9bc; background: #f1faf7; }
+.sensitivity-item { width: 100%; padding: 11px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: white; text-align: left; cursor: pointer; }
+.sensitivity-item:hover { border-color: #9bcfc5; background: #f7fbfa; }
+.sensitivity-item.active { border: 2px solid var(--teal); padding: 10px; background: #f1faf7; }
 .sensitivity-item > div:first-child b { color: #315f59; background: #e3f2ee; }
 .sensitivity-item > small { display: block; margin-top: 5px; color: var(--muted); font-size: 8px; }
 .sensitivity-conclusion, .forecast-summary { margin: 11px 0 0; padding: 10px 11px; border-radius: 8px; color: #365b56; background: #eaf5f2; font-size: 10px; font-weight: 700; line-height: 1.5; }
 .forecast-summary { color: #6d5333; background: #fff3e2; }
 .forecast-summary strong { color: #a35f1d; font-size: 13px; }
 .forecast-chart { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 12px; }
-.forecast-stage-card { padding: 14px; border: 1px solid var(--line); border-radius: 9px; background: white; }
+.forecast-stage-card { padding: 14px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: white; text-align: left; cursor: pointer; }
+.forecast-stage-card:hover { border-color: #9bcfc5; background: #f8fcfb; }
 .forecast-stage-card.active { border: 2px solid var(--teal); padding: 13px; background: #f0faf7; box-shadow: 0 7px 18px rgba(8,127,114,.08); }
 .forecast-stage-card > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .forecast-stage-card > div:first-child span { color: var(--muted); font-size: 8px; }
@@ -313,7 +311,6 @@ footer p { margin: 0; }
   .fee-summary-grid { grid-template-columns: 1fr; }
   .forecast-chart { grid-template-columns: 1fr 1fr; }
   .decision-panel { padding: 18px; }
-  .horizon-control { align-items: flex-start; flex-direction: column; }
   .recommendation-banner { align-items: stretch; flex-direction: column; }
   .recommendation-value { min-width: 0; padding: 14px 0 0; border-top: 1px solid rgba(16,42,43,.12); border-left: 0; text-align: left; }
   .subsection-head > p { text-align: left; }
@@ -329,7 +326,6 @@ footer p { margin: 0; }
   .control-strip, .field-grid.two, .summary-grid, .fee-summary-grid, .scenario-grid, .forecast-chart, .readiness-grid { grid-template-columns: 1fr; }
   .upload-actions { grid-template-columns: 1fr; }
   .result-actions { align-items: stretch; flex-direction: column; }
-  .horizon-control > div { width: 100%; display: grid; grid-template-columns: repeat(4, 1fr); }
   .cost-equation { flex-wrap: wrap; }
   .cost-equation span, .cost-equation > strong { flex-basis: 40%; }
 }

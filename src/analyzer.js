@@ -367,7 +367,7 @@ function recommendScenario(holdValue, liquidateValue, horizonDays) {
   return scenarios.reduce((best, scenario) => scenario.value > best.value ? scenario : best);
 }
 
-function forecastHolding(item, rule, horizonDays, currentMonth, salesMultiplier = 1) {
+export function forecastHolding(item, rule, horizonDays, currentMonth, salesMultiplier = 1) {
   if (item.actionUnits <= 0) {
     return {
       horizonDays, expectedSoldUnits: 0, remainingUnits: 0,
@@ -667,12 +667,16 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
       : { key: "pending", label: actionRows.length ? "补全费用后再比较" : "无需处理", value: null };
     const sensitivity = SALES_SCENARIOS.map((scenario) => {
       const scenarioForecasts = actionRows.map((row) => forecastHolding(row, rule, horizonDays, month, scenario.multiplier));
+      const scenarioSum = (field) => scenarioForecasts.reduce((total, item) => total + (Number.isFinite(item[field]) ? item[field] : 0), 0);
       const scenarioReady = scenarioForecasts.filter((item) => Number.isFinite(item.holdThenLiquidateValue)).length;
-      const scenarioHoldValue = scenarioForecasts.reduce((total, item) => total + (Number.isFinite(item.holdThenLiquidateValue) ? item.holdThenLiquidateValue : 0), 0);
-      const scenarioHoldingCost = scenarioForecasts.reduce((total, item) => total + (Number.isFinite(item.totalHoldingCost) ? item.totalHoldingCost : 0), 0);
+      const scenarioHoldValue = scenarioSum("holdThenLiquidateValue");
       return {
         ...scenario,
-        totalHoldingCost: scenarioHoldingCost,
+        expectedSoldUnits: scenarioSum("expectedSoldUnits"),
+        remainingUnits: scenarioSum("remainingUnits"),
+        baseStorageCost: scenarioSum("baseStorageCost"),
+        agedSurchargeCost: scenarioSum("agedSurchargeCost"),
+        totalHoldingCost: scenarioSum("totalHoldingCost"),
         holdThenLiquidateValue: scenarioReady === actionRows.length && actionRows.length > 0 ? scenarioHoldValue : null,
         recommendation: scenarioReady === actionRows.length && actionRows.length > 0
           ? recommendScenario(scenarioHoldValue, sum("liquidationNet"), horizonDays)

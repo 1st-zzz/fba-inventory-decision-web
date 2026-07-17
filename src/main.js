@@ -5,6 +5,8 @@ import {
   DETAILED_AGE_BUCKETS,
   exportRowsToCsv,
   FORECAST_HORIZONS,
+  forecastHolding,
+  SALES_SCENARIOS,
   workbookToSources,
 } from "./analyzer.js";
 
@@ -21,6 +23,7 @@ let riskFilter = "全部";
 let actionFilter = "all";
 let sortMode = "impact";
 let selectedHorizon = 90;
+let selectedSalesScenario = "baseline";
 let xlsxModule;
 
 async function getXlsx() {
@@ -133,7 +136,6 @@ root.innerHTML = `
       <section class="decision-panel" id="fee-calculation">
         <div class="decision-panel-head">
           <div><p class="eyebrow">STEP 03 · CALCULATE</p><h2>当前费用与继续放置成本</h2><p class="section-note">先分别看“本月继续存、现在清算、现在移除”三笔账，再比较继续放置不同阶段的累计成本。</p></div>
-          <div class="horizon-control" aria-label="选择继续持有天数"><span>选择继续放置阶段</span><div id="horizon-buttons"></div></div>
         </div>
         <div id="decision-scope" class="decision-scope"></div>
         <div id="fee-summary-grid" class="fee-summary-grid"></div>
@@ -151,7 +153,7 @@ root.innerHTML = `
         <div id="decision-reason" class="decision-reason"></div>
 
         <section class="support-panel sensitivity-panel">
-          <div class="subsection-head"><div><p class="eyebrow">SALES CHECK</p><h3>销量变动会改变结论吗？</h3></div><p>按最近30日销量上下浮动30%</p></div>
+          <div class="subsection-head"><div><p class="eyebrow">SALES SCENARIO</p><h3>选择销量情景</h3></div><p>点击选择下降30%、基准或提高30%，页面测算会同步更新</p></div>
           <p id="sensitivity-conclusion" class="sensitivity-conclusion"></p>
           <div id="sensitivity-grid" class="sensitivity-grid"></div>
         </section>
@@ -231,12 +233,26 @@ function updateSelectedFiles() {
   clearButton.disabled = selectedFiles.length === 0;
 }
 
+function selectedSalesModel() {
+  return SALES_SCENARIOS.find((scenario) => scenario.key === selectedSalesScenario) || SALES_SCENARIOS[1];
+}
+
+function forecastForSalesScenario(baseForecast) {
+  if (selectedSalesScenario === "baseline") return baseForecast;
+  const scenario = baseForecast.sensitivity.find((item) => item.key === selectedSalesScenario);
+  return scenario ? { ...baseForecast, ...scenario, sensitivity: baseForecast.sensitivity } : baseForecast;
+}
+
 function selectedSummaryForecast() {
-  return current.summary.forecasts.find((forecast) => forecast.horizonDays === selectedHorizon);
+  const baseForecast = current.summary.forecasts.find((forecast) => forecast.horizonDays === selectedHorizon);
+  return forecastForSalesScenario(baseForecast);
 }
 
 function rowForecast(row) {
-  return row.forecasts.find((forecast) => forecast.horizonDays === selectedHorizon);
+  const baseForecast = row.forecasts.find((forecast) => forecast.horizonDays === selectedHorizon);
+  if (selectedSalesScenario === "baseline") return baseForecast;
+  const analysisMonth = new Date(`${current.analysisDate}T00:00:00`).getMonth() + 1;
+  return forecastHolding(row, current.rule, selectedHorizon, analysisMonth, selectedSalesModel().multiplier);
 }
 
 function actionLabel(key) {
@@ -341,8 +357,6 @@ function render() {
     <article class="cost-path-card removal-path"><div class="cost-path-head"><span>账三</span><b>现在移除</b></div><p>预计移除总损失</p><h3>${removalTotalLoss}</h3><div class="cost-equation"><span>采购成本<b>${fullRemovalLoss ? money(summary.knownProductCost) : "待补"}</b></span><i>＋</i><span>头程<b>${fullRemovalLoss ? money(summary.knownFirstMileCost) : "待补"}</b></span><i>＋</i><span>Amazon移除费<b>${money(summary.removalFee)}</b></span><i>＝</i><strong>${removalLossAbsolute}</strong></div><small>总损失用负数表示；因缺少移除后回收价值，不参与最终推荐。</small></article>
   `;
 
-  document.querySelector("#horizon-buttons").innerHTML = FORECAST_HORIZONS.map((days) => `<button type="button" data-horizon="${days}" class="${days === selectedHorizon ? "active" : ""}">${days} 天</button>`).join("");
-
   const completeComparison = forecast.readiness.actionSkuCount > 0 && forecast.readiness.comparison === forecast.readiness.actionSkuCount;
   const comparable = Number.isFinite(forecast.holdThenLiquidateValue) && Number.isFinite(summary.liquidationNet);
   const decisionDifference = comparable ? Math.abs(forecast.holdThenLiquidateValue - summary.liquidationNet) : null;
@@ -391,20 +405,22 @@ function render() {
   const sensitivityKeys = forecast.sensitivity.map((scenario) => scenario.recommendation.key);
   const sensitivityStable = sensitivityKeys.length > 0 && sensitivityKeys.every((key) => key === sensitivityKeys[0]) && sensitivityKeys[0] !== "pending";
   const sensitivityRecommendation = sensitivityKeys[0] === "liquidate" ? "现在清算" : sensitivityKeys[0] === "hold" ? `继续销售 ${selectedHorizon} 天` : "待补数据";
+  const activeSalesLabel = selectedSalesScenario === "conservative" ? "销量下降 30%" : selectedSalesScenario === "optimistic" ? "销量提高 30%" : "基准销量";
   document.querySelector("#sensitivity-conclusion").textContent = sensitivityStable
-    ? `结论稳定：销量下降 30%、保持不变或提高 30%，建议都仍是“${sensitivityRecommendation}”。`
-    : "结论会随销量变化，请查看三个情景，并优先核对销量预测。";
+    ? `当前使用“${activeSalesLabel}”。三种销量情景下，建议都仍是“${sensitivityRecommendation}”。`
+    : `当前使用“${activeSalesLabel}”。不同销量情景会改变结论，请切换查看。`;
   document.querySelector("#sensitivity-grid").innerHTML = forecast.sensitivity.map((scenario) => `
-    <article class="sensitivity-item ${scenario.key === "baseline" ? "baseline" : ""}"><div><span>销量 ${scenario.multiplier === 1 ? "不变" : scenario.multiplier < 1 ? "下降 30%" : "提高 30%"}</span><b>${scenario.recommendation.key === "liquidate" ? "现在清算" : scenario.recommendation.key === "hold" ? `继续销售 ${selectedHorizon} 天` : "待补数据"}</b></div><small>继续销售后的现金结果 ${moneyOrPending(scenario.holdThenLiquidateValue)}</small></article>
+    <button type="button" class="sensitivity-item ${scenario.key === selectedSalesScenario ? "active" : ""}" data-sales-scenario="${scenario.key}" aria-pressed="${scenario.key === selectedSalesScenario}"><div><span>销量 ${scenario.multiplier === 1 ? "不变" : scenario.multiplier < 1 ? "下降 30%" : "提高 30%"}</span><b>${scenario.recommendation.key === "liquidate" ? "现在清算" : scenario.recommendation.key === "hold" ? `继续销售 ${selectedHorizon} 天` : "待补数据"}</b></div><small>继续销售后的现金结果 ${moneyOrPending(scenario.holdThenLiquidateValue)}</small></button>
   `).join("");
 
   document.querySelector("#forecast-coverage").textContent = `费用覆盖 ${number(forecast.readiness.storage)}/${number(forecast.readiness.actionSkuCount)} 个计费 SKU`;
   document.querySelector("#forecast-summary").innerHTML = `选择继续放 <b>${selectedHorizon} 天</b>：从现在到该阶段，预计累计再付 <strong>${money(forecast.totalHoldingCost)}</strong>。这是累计金额，不是单月费用。`;
-  document.querySelector("#forecast-chart").innerHTML = summary.forecasts.map((item) => `
-    <article class="forecast-stage-card ${item.horizonDays === selectedHorizon ? "active" : ""}"><div><span>继续放置</span><b>${item.horizonDays} 天</b></div><p>累计新增仓储费</p><h4>${money(item.totalHoldingCost)}</h4><dl><div><dt>其中基础仓储费</dt><dd>${money(item.baseStorageCost)}</dd></div><div><dt>其中长期附加费</dt><dd>${money(item.agedSurchargeCost)}</dd></div><div><dt>预计到期仍剩</dt><dd>${number(item.remainingUnits)} 件</dd></div></dl></article>
-  `).join("");
-  const forecast90 = summary.forecasts.find((item) => item.horizonDays === 90);
-  const forecast180 = summary.forecasts.find((item) => item.horizonDays === 180);
+  document.querySelector("#forecast-chart").innerHTML = summary.forecasts.map((baseItem) => {
+    const item = forecastForSalesScenario(baseItem);
+    return `<button type="button" class="forecast-stage-card ${item.horizonDays === selectedHorizon ? "active" : ""}" data-horizon="${item.horizonDays}" aria-pressed="${item.horizonDays === selectedHorizon}"><div><span>继续放置</span><b>${item.horizonDays} 天</b></div><p>累计新增仓储费</p><h4>${money(item.totalHoldingCost)}</h4><dl><div><dt>其中基础仓储费</dt><dd>${money(item.baseStorageCost)}</dd></div><div><dt>其中长期附加费</dt><dd>${money(item.agedSurchargeCost)}</dd></div><div><dt>预计到期仍剩</dt><dd>${number(item.remainingUnits)} 件</dd></div></dl></button>`;
+  }).join("");
+  const forecast90 = forecastForSalesScenario(summary.forecasts.find((item) => item.horizonDays === 90));
+  const forecast180 = forecastForSalesScenario(summary.forecasts.find((item) => item.horizonDays === 180));
   const addedAfter90 = forecast180.totalHoldingCost - forecast90.totalHoldingCost;
   document.querySelector("#forecast-driver").innerHTML = `<b>为什么长期费用会上升：</b>从90天延长到180天预计再增加 ${money(addedAfter90)}。库存会进入更高库龄费率区间，跨入10–12月时基础仓储费也可能上升。`;
 
@@ -428,7 +444,7 @@ function render() {
     const breakEven = row.actionUnits <= 0 ? "—" : row.breakEvenDays ? (row.breakEvenDays <= 1 ? "立即" : `${row.breakEvenDays} 天`) : ">365 天";
     return `<tr><td><b>${escapeHtml(row.sku)}</b><span>${escapeHtml(row.asin)}</span><small>${escapeHtml(row.product)}</small></td><td>${riskBadge(row.risk)}</td><td>${number(row.available)}</td><td>${number(row.sales30)}</td><td>${number(row.actionUnits)}</td><td>${number(itemForecast.remainingUnits)}</td><td>${moneyOrPending(itemForecast.totalHoldingCost)}</td><td>${breakEven}</td><td>${moneyOrPending(row.liquidationNet)}</td><td>${moneyOrPending(row.removalTotalLoss)}</td><td><b class="action action-${itemForecast.recommendation.key}">${escapeHtml(actionLabel(itemForecast.recommendation.key))}</b></td></tr>`;
   }).join("");
-  document.querySelector("#table-count").textContent = `显示 ${number(rows.length)}/${number(summary.skuCount)} 个 SKU · 决策窗口 ${selectedHorizon} 天 · CSV 含全部四个预测周期。`;
+  document.querySelector("#table-count").textContent = `显示 ${number(rows.length)}/${number(summary.skuCount)} 个 SKU · ${selectedHorizon} 天 · ${activeSalesLabel} · CSV 含基准销量下的四个预测周期。`;
 
   const warnings = current.warnings.length ? current.warnings : ["当前报告组合已覆盖主要字段；执行前仍应复核 Seller Central 费率预览。"];
   document.querySelector("#warning-list").innerHTML = warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("");
@@ -496,7 +512,8 @@ document.querySelector("#demo-button").addEventListener("click", () => {
 marketplace.addEventListener("change", () => { if (!usingDemo && selectedFiles.length) analyzeSelectedFiles({ scrollToResults: false }); else recalculate(); });
 analysisDateInput.addEventListener("change", recalculate);
 for (const input of [productCostRateInput, fulfillmentFeeRateInput, firstMileRateInput]) input.addEventListener("change", recalculate);
-document.querySelector("#horizon-buttons").addEventListener("click", (event) => { const button = event.target.closest("button[data-horizon]"); if (!button) return; selectedHorizon = Number(button.dataset.horizon); render(); });
+document.querySelector("#forecast-chart").addEventListener("click", (event) => { const button = event.target.closest("button[data-horizon]"); if (!button) return; selectedHorizon = Number(button.dataset.horizon); render(); });
+document.querySelector("#sensitivity-grid").addEventListener("click", (event) => { const button = event.target.closest("button[data-sales-scenario]"); if (!button) return; selectedSalesScenario = button.dataset.salesScenario; render(); });
 document.querySelector("#inventory-search-input").addEventListener("input", (event) => { inventoryQuery = event.target.value.trim(); render(); });
 document.querySelector("#search-input").addEventListener("input", (event) => { query = event.target.value.trim(); render(); });
 document.querySelector("#risk-filter").addEventListener("change", (event) => { riskFilter = event.target.value; render(); });

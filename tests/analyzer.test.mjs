@@ -217,7 +217,9 @@ test("forecast includes three sales sensitivity scenarios", () => {
   const result = createDemoAnalysis("US");
   const forecast = result.summary.forecasts.find((item) => item.horizonDays === 90);
   assert.deepEqual(forecast.sensitivity.map((item) => item.multiplier), [0.7, 1, 1.3]);
-  assert.ok(forecast.sensitivity.every((item) => Number.isFinite(item.totalHoldingCost)));
+  assert.ok(forecast.sensitivity.every((item) => [item.expectedSoldUnits, item.remainingUnits, item.baseStorageCost, item.agedSurchargeCost, item.totalHoldingCost].every(Number.isFinite)));
+  assert.ok(forecast.sensitivity[0].expectedSoldUnits < forecast.sensitivity[2].expectedSoldUnits);
+  assert.ok(forecast.sensitivity[0].remainingUnits > forecast.sensitivity[2].remainingUnits);
   assert.equal(result.summary.decisionBreakEvenDays, 31);
 });
 
