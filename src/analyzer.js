@@ -149,7 +149,7 @@ function rowToSource(type, row, rule) {
       product: text(first(row, ["product-name", "item-name", "product"])),
       available: numberOrNull(first(row, ["available", "afn-fulfillable-quantity", "quantity"])),
       transfer: valueOrZero(first(row, ["fc-transfer", "transfer"])),
-      sales30: valueOrZero(first(row, ["units-shipped-t30", "sales-30", "30-day-sales"])),
+      sales30: numberOrNull(first(row, ["units-shipped-t30", "sales-30", "30-day-sales"])),
       excess: numberOrNull(first(row, ["estimated-excess-quantity", "excess-quantity", "excess"])),
       price: firstPositive(row, ["your-price", "featuredoffer-price", "lowest-price-new-plus-shipping", "sales-price", "price"]),
       productCost: numberOrNull(first(row, ["product-cost", "unit-cost", "cost"])),
@@ -559,6 +559,7 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
   const defaultFirstMileRate = rateOrNull(options.defaultFirstMileRate);
   const analyzed = [...items.values()].map((item, index) => {
     const available = Number.isFinite(item.available) ? Math.max(0, item.available) : sumAge(item.age);
+    const salesInputReady = Number.isFinite(item.sales30);
     const sales30 = Math.max(0, valueOrZero(item.sales30));
     const excess = Number.isFinite(item.excess) ? Math.max(0, item.excess) : Math.max(0, available - sales30 * 3);
     const daysSupply = available === 0 ? 0 : sales30 > 0 ? Math.min(999, Math.round(available / sales30 * 30)) : 999;
@@ -572,6 +573,7 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
       daysSupply,
       price: valueOrZero(item.price),
       sizeTier: item.sizeTier || "standard",
+      salesInputReady,
     };
     normalized.productCostRate = Number.isFinite(normalized.productCostRate) ? normalized.productCostRate : defaultProductCostRate;
     normalized.fulfillmentFeeRate = Number.isFinite(normalized.fulfillmentFeeRate) ? normalized.fulfillmentFeeRate : defaultFulfillmentFeeRate;
@@ -631,8 +633,20 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
       && Number.isFinite(normalized.knownFirstMileCost)
       ? normalized.liquidationNet - normalized.knownProductCost - normalized.knownFirstMileCost
       : null;
+    normalized.liquidationNetAfterCosts = normalized.liquidationBookProfit;
     Object.assign(normalized, calculateRisk(normalized, rule));
     normalized.forecasts = FORECAST_HORIZONS.map((horizonDays) => forecastHolding(normalized, rule, horizonDays, month));
+    const missingFields = [];
+    if (!normalized.salesInputReady) missingFields.push("30日销量");
+    if (!(normalized.price > 0)) missingFields.push("售价");
+    if (!Number.isFinite(normalized.referralFee)) missingFields.push("销售佣金");
+    if (!Number.isFinite(normalized.productCost)) missingFields.push("采购成本");
+    if (!Number.isFinite(normalized.fulfillmentFee)) missingFields.push("FBA配送费");
+    if (!Number.isFinite(normalized.firstMileCost)) missingFields.push("头程");
+    if (normalized.actionUnits > 0 && !Number.isFinite(normalized.liquidationProcessing)) missingFields.push("清算处理费");
+    if (normalized.actionUnits > 0 && normalized.forecasts.some((forecast) => !Number.isFinite(forecast.totalHoldingCost))) missingFields.push("体积/仓储费");
+    normalized.missingFields = [...new Set(missingFields)];
+    normalized.decisionMissingFields = normalized.actionUnits > 0 ? normalized.missingFields : [];
     normalized.breakEvenDays = breakEvenDays(normalized, rule, month);
     return normalized;
   });
@@ -736,6 +750,7 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
       liquidationFee: sum("liquidationFee"),
       liquidationNet: sum("liquidationNet"),
       liquidationBookProfit: sum("liquidationBookProfit"),
+      liquidationNetAfterCosts: sum("liquidationNetAfterCosts"),
       knownProductCost: sum("knownProductCost"),
       knownFirstMileCost: sum("knownFirstMileCost"),
       removalFee: sum("removalFee"),
@@ -749,6 +764,9 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
         medium: analyzed.filter((row) => row.risk === "中").length,
         low: analyzed.filter((row) => row.risk === "低").length,
       },
+      missingSkuDetails: analyzed
+        .filter((row) => row.missingFields.length > 0)
+        .map((row) => ({ sku: row.sku, asin: row.asin, product: row.product, fields: row.missingFields })),
       readiness: {
         price: analyzed.filter((row) => row.price > 0).length,
         fee: countReady("removalFee"),
@@ -761,6 +779,7 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
         bookPnl: actionRows.filter((row) => Number.isFinite(row.liquidationBookProfit)).length,
         removalLoss: actionRows.filter((row) => Number.isFinite(row.removalTotalLoss)).length,
         actionSkuCount: actionRows.length,
+        decisionReady: actionRows.filter((row) => row.decisionMissingFields.length === 0).length,
       },
     },
   };
@@ -807,14 +826,15 @@ export function createDemoAnalysis(marketplace = "US", options = {}) {
   });
 }
 
-export function exportRowsToCsv(rows, currency) {
+export function exportRowsToCsv(rows, currency, options = {}) {
+  const excludedSkus = new Set(options.excludedSkus || []);
   const forecastHeaders = FORECAST_HORIZONS.flatMap((horizonDays) => [
     `Hold${horizonDays}ExpectedSoldUnits`, `Hold${horizonDays}RemainingUnits`,
     `Hold${horizonDays}BaseStorage_${currency}`, `Hold${horizonDays}AgedSurcharge_${currency}`,
     `Hold${horizonDays}TotalHoldingCost_${currency}`, `Hold${horizonDays}ThenLiquidateValue_${currency}`,
     `Hold${horizonDays}Recommendation`,
   ]);
-  const headers = ["SKU", "ASIN", "Product", "Risk", "Action", "Available", "Sales30", "DaysSupply", "AgedUnits", "ActionUnits_AgedOnly", "ExcessUnits", `SalePrice_${currency}`, "ProductCostRate", `ProductCost_${currency}`, "FBAFulfillmentFeeRate", `FBAFulfillmentFee_${currency}`, "FirstMileRate", `FirstMileCost_${currency}`, `NormalSaleNetPerUnit_${currency}`, `NormalSaleFullProfitPerUnit_${currency}`, `Storage_${currency}`, `AgedFee_${currency}`, `LiquidationGross_${currency}`, `LiquidationReferralFee_${currency}`, `LiquidationProcessingFee_${currency}`, `LiquidationTotalFee_${currency}`, `LiquidationNet_${currency}`, `LiquidationBookProfit_${currency}`, `AmazonRemovalFee_${currency}`, `RemovalTotalLoss_${currency}`, "BreakEvenDays", ...forecastHeaders];
+  const headers = ["SKU", "ASIN", "Product", "Risk", "Action", "MissingFields", "DecisionScope", "Available", "Sales30", "DaysSupply", "AgedUnits", "ActionUnits_AgedOnly", "ExcessUnits", `SalePrice_${currency}`, "ProductCostRate", `ProductCost_${currency}`, "FBAFulfillmentFeeRate", `FBAFulfillmentFee_${currency}`, "FirstMileRate", `FirstMileCost_${currency}`, `NormalSaleNetPerUnit_${currency}`, `NormalSaleFullProfitPerUnit_${currency}`, `Storage_${currency}`, `AgedFee_${currency}`, `LiquidationGross_${currency}`, `LiquidationReferralFee_${currency}`, `LiquidationProcessingFee_${currency}`, `LiquidationTotalFee_${currency}`, `LiquidationCashRecovery_${currency}`, `LiquidationNetAfterCosts_${currency}`, `AmazonRemovalFee_${currency}`, `RemovalTotalLoss_${currency}`, "BreakEvenDays", ...forecastHeaders];
   const escape = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
   const lines = rows.map((row) => {
     const forecastValues = FORECAST_HORIZONS.flatMap((horizonDays) => {
@@ -825,12 +845,12 @@ export function exportRowsToCsv(rows, currency) {
         forecast.recommendation.label,
       ];
     });
-    return [row.sku, row.asin, row.product, row.risk, row.action, row.available, row.sales30,
+    return [row.sku, row.asin, row.product, row.risk, row.action, (row.missingFields || []).join("、"), excludedSkus.has(row.sku) ? "Excluded" : "Included", row.available, row.sales30,
     row.daysSupply, row.aged, row.actionUnits, row.excess, row.price, row.productCostRate, row.productCost,
     row.fulfillmentFeeRate, row.fulfillmentFee, row.firstMileRate, row.firstMileCost,
     row.normalSaleNetPerUnit, row.normalSaleFullProfitPerUnit,
     row.storageEstimate, row.agedFee, row.liquidationGross, row.liquidationReferral, row.liquidationProcessing,
-    row.liquidationFee, row.liquidationNet, row.liquidationBookProfit, row.removalFee, row.removalTotalLoss,
+    row.liquidationFee, row.liquidationNet, row.liquidationNetAfterCosts, row.removalFee, row.removalTotalLoss,
     row.breakEvenDays, ...forecastValues,
   ].map(escape).join(",");
   });

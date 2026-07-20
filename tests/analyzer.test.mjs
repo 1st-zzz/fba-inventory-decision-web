@@ -65,7 +65,7 @@ test("parses and merges synthetic reports without server state", () => {
   assert.equal(result.summary.liquidationFee, 36.75);
 });
 
-test("liquidation headline excludes product and first-mile costs", () => {
+test("keeps cash recovery separate from net recovery after product and first-mile costs", () => {
   const result = analyzeSources([{
     fileName: "demo.csv",
     sheetName: "Sheet1",
@@ -98,6 +98,7 @@ test("liquidation headline excludes product and first-mile costs", () => {
   assert.equal(row.normalSaleNetPerUnit, 75);
   assert.equal(row.normalSaleFullProfitPerUnit, 40);
   assert.equal(row.liquidationBookProfit, -288.75);
+  assert.equal(row.liquidationNetAfterCosts, -288.75);
   assert.ok(Math.abs(row.removalFee - 8.4) < 1e-9);
   assert.ok(Math.abs(row.removalTotalLoss + 358.4) < 1e-9);
 });
@@ -216,6 +217,37 @@ test("CSV export includes auditable forecasts for every decision horizon", () =>
   assert.match(csv, /Hold180TotalHoldingCost_USD/);
   assert.match(csv, /Hold90Recommendation/);
   assert.match(csv, /BreakEvenDays/);
+  assert.match(csv, /MissingFields/);
+  assert.match(csv, /DecisionScope/);
+  assert.match(csv, /LiquidationNetAfterCosts_USD/);
+});
+
+test("identifies the exact SKU and fields missing from a decision", () => {
+  const result = analyzeSources([{
+    fileName: "missing-data.csv",
+    sheetName: "Sheet1",
+    type: "inventory",
+    label: "库存报告",
+    rows: [{
+      sku: "DEMO-MISSING-001",
+      available: 10,
+      price: 100,
+      referralFee: 15,
+      fulfillmentFee: 10,
+      weight: 0.4,
+      volume: 0.1,
+      sizeTier: "standard",
+      ageMode: "detailed",
+      age: { "181-210": 10 },
+    }],
+  }], "US", { month: 7 });
+  const row = result.rows[0];
+  assert.equal(row.salesInputReady, false);
+  assert.ok(row.missingFields.includes("30日销量"));
+  assert.ok(row.missingFields.includes("采购成本"));
+  assert.ok(row.missingFields.includes("头程"));
+  assert.deepEqual(result.summary.missingSkuDetails[0].sku, "DEMO-MISSING-001");
+  assert.equal(result.summary.readiness.decisionReady, 0);
 });
 
 test("removal stays outside recommendations when recovery is unknown", () => {
