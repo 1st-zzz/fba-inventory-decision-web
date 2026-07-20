@@ -64,7 +64,15 @@ root.innerHTML = `
       <span>FBA 库存决策台<small>本地分析 · 不保存卖家数据</small></span>
     </a>
     <nav aria-label="页面导航"><a href="#setup">数据设置</a><a href="#inventory-overview">库存概况</a><a href="#fee-calculation">费用测算</a><a href="#sku-list">SKU 清单</a></nav>
-    <div class="privacy-pill"><span></span>文件仅在当前浏览器处理</div>
+    <div class="topbar-tools">
+      <div class="font-controls" role="group" aria-label="调整页面字体大小">
+        <span>字体</span>
+        <button type="button" data-font-scale="0.9" title="小号字体" aria-label="使用小号字体">A−</button>
+        <button type="button" data-font-scale="1" title="标准字体" aria-label="使用标准字体">A</button>
+        <button type="button" data-font-scale="1.15" title="大号字体" aria-label="使用大号字体">A＋</button>
+      </div>
+      <div class="privacy-pill"><span></span>文件仅在当前浏览器处理</div>
+    </div>
   </header>
 
   <main>
@@ -101,23 +109,23 @@ root.innerHTML = `
       <details class="report-source-guide">
         <summary><span><b>这些输入文件从哪里下载？</b><small>Seller Central 获取路径与脱敏截图</small></span><em>点击展开</em></summary>
         <div class="source-guide-body">
-          <p class="source-guide-note">以下路径来自 Amazon Seller Central。不同站点或新版界面的菜单名称可能略有差异；截图已移除店铺名称、浏览器地址和真实 SKU 数据。</p>
+          <p class="source-guide-note">以下 4 张图完整保留你提供的 Seller Central 页面范围，没有裁剪；店铺、浏览器地址、报告记录、真实 SKU 及经营数据已做不可逆模糊。不同站点或新版界面的菜单名称可能略有差异。</p>
           <div class="source-guide-grid">
             <details class="source-guide-card">
               <summary><span class="source-order">01</span><span><b>库存报告</b><small>报告 → 配送 → 亚马逊物流库存 → 请求下载 .csv 文件</small></span><em>查看截图</em></summary>
-              <figure><img src="./report-sources/amazon-fulfilled-inventory-download.jpg" loading="lazy" alt="Seller Central 亚马逊物流库存报告与 CSV 下载入口" /><figcaption>文件来源：Seller Central 自定义报告生成器中的“亚马逊物流库存”。选择“请求下载 .csv 文件”，等待报告状态变为可下载。</figcaption></figure>
+              <figure><a class="source-image-link" href="./report-sources/amazon-fulfilled-inventory-download.jpg" target="_blank" rel="noopener"><img src="./report-sources/amazon-fulfilled-inventory-download.jpg" loading="lazy" decoding="async" alt="Seller Central 亚马逊物流库存报告与 CSV 下载入口完整脱敏截图" /><span>点击查看完整尺寸</span></a><figcaption>文件来源：Seller Central 自定义报告生成器中的“亚马逊物流库存”。选择“请求下载 .csv 文件”，等待报告状态变为可下载。截图完整保留，报告请求记录已模糊。</figcaption></figure>
             </details>
             <details class="source-guide-card">
               <summary><span class="source-order">02</span><span><b>库龄报告</b><small>库存 → 分析 → 亚马逊物流分析 → 库龄和冗余数量</small></span><em>查看截图</em></summary>
-              <figure><img src="./report-sources/fba-inventory-age-analysis.jpg" loading="lazy" alt="Seller Central 亚马逊物流分析中的库存库龄区间" /><figcaption>文件来源：Seller Central“亚马逊物流分析”的库龄和冗余数量页面。用于核对 0–180、181–210、211–240 等库龄区间；需要完整 SKU 文件时，按页面提示进入“亚马逊物流库存”并请求 CSV。</figcaption></figure>
+              <figure><a class="source-image-link" href="./report-sources/fba-inventory-age-analysis.jpg" target="_blank" rel="noopener"><img src="./report-sources/fba-inventory-age-analysis.jpg" loading="lazy" decoding="async" alt="Seller Central 亚马逊物流分析中的库存库龄区间完整脱敏截图" /><span>点击查看完整尺寸</span></a><figcaption>文件来源：Seller Central“亚马逊物流分析”的库龄和冗余数量页面。用于核对 0–180、181–210、211–240 等库龄区间；需要完整 SKU 文件时，按页面提示进入“亚马逊物流库存”并请求 CSV。截图完整保留，店铺、SKU、ASIN、商品与经营数据已模糊。</figcaption></figure>
             </details>
             <details class="source-guide-card">
               <summary><span class="source-order">03</span><span><b>仓储收费报告</b><small>报告中心 → 付款 → 月度仓储费 → 请求下载 .csv 文件</small></span><em>查看截图</em></summary>
-              <figure><img src="./report-sources/monthly-storage-fees-download.jpg" loading="lazy" alt="Seller Central 月度仓储费报告与下载入口" /><figcaption>文件来源：Seller Central 报告中心的“月度仓储费”。选择月份后请求 CSV，待报告生成后点击“下载”。</figcaption></figure>
+              <figure><a class="source-image-link" href="./report-sources/monthly-storage-fees-download.jpg" target="_blank" rel="noopener"><img src="./report-sources/monthly-storage-fees-download.jpg" loading="lazy" decoding="async" alt="Seller Central 月度仓储费报告与下载入口完整脱敏截图" /><span>点击查看完整尺寸</span></a><figcaption>文件来源：Seller Central 报告中心的“月度仓储费”。选择月份后请求 CSV，待报告生成后点击“下载”。截图完整保留，浏览器地址与报告请求记录已模糊。</figcaption></figure>
             </details>
             <details class="source-guide-card">
               <summary><span class="source-order">04</span><span><b>销售佣金预览报告与所有商品报告</b><small>库存报告 → 请求库存报告 → 选择报告类型</small></span><em>查看截图</em></summary>
-              <figure><img src="./report-sources/report-center-report-selection.jpg" loading="lazy" alt="Seller Central 库存报告类型选择菜单" /><figcaption>文件来源：Seller Central“库存报告”的“请求库存报告”下拉菜单。选择“销售佣金预览报告”或“所有商品报告”；销售佣金预览报告与“销售佣金折扣报告”不是同一份文件，请勿误选。</figcaption></figure>
+              <figure><a class="source-image-link" href="./report-sources/report-center-report-selection.jpg" target="_blank" rel="noopener"><img src="./report-sources/report-center-report-selection.jpg" loading="lazy" decoding="async" alt="Seller Central 库存报告类型选择菜单完整脱敏截图" /><span>点击查看完整尺寸</span></a><figcaption>文件来源：Seller Central“库存报告”的“请求库存报告”下拉菜单。选择“销售佣金预览报告”或“所有商品报告”；销售佣金预览报告与“销售佣金折扣报告”不是同一份文件，请勿误选。截图完整保留，店铺、浏览器书签和报告编号已模糊。</figcaption></figure>
             </details>
           </div>
         </div>
@@ -210,6 +218,34 @@ root.innerHTML = `
 
   <footer><span>FBA 库存决策台</span><p>公开页面仅含脱敏演示数据 · 不会自动创建清算或移除订单</p></footer>
 `;
+
+const FONT_SCALE_KEY = "fba-inventory-font-scale";
+const allowedFontScales = new Set(["0.9", "1", "1.15"]);
+
+function applyFontScale(scale) {
+  const normalized = allowedFontScales.has(String(scale)) ? String(scale) : "1";
+  document.documentElement.style.setProperty("--font-scale", normalized);
+  document.querySelectorAll("[data-font-scale]").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.fontScale === normalized));
+  });
+  try {
+    window.localStorage.setItem(FONT_SCALE_KEY, normalized);
+  } catch {
+    // The preference is optional; analysis continues when storage is unavailable.
+  }
+}
+
+let savedFontScale = "1";
+try {
+  savedFontScale = window.localStorage.getItem(FONT_SCALE_KEY) || "1";
+} catch {
+  savedFontScale = "1";
+}
+applyFontScale(savedFontScale);
+document.querySelector(".font-controls").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-font-scale]");
+  if (button) applyFontScale(button.dataset.fontScale);
+});
 
 const fileInput = document.querySelector("#file-input");
 const dropzone = document.querySelector("#dropzone");
