@@ -17,6 +17,7 @@ const recognizedHeaders = new Set([
   "item-volume", "weight", "estimated-referral-fee-per-item", "item-name",
   "unit-cost", "product-cost", "unit-cost-rate", "product-cost-rate",
   "fulfillment-fee-per-unit", "fulfillment-fee-rate", "first-mile-cost-rate",
+  "clearance-price-rate", "advertising-cost-rate", "advertising-cost-per-unit", "clearance-sales-30",
 ]);
 
 export const DETAILED_AGE_BUCKETS = [
@@ -158,6 +159,10 @@ function rowToSource(type, row, rule) {
       firstMileRate: rateOrNull(first(row, ["first-mile-cost-rate", "first-mile-rate", "头程占售价比例"])),
       fulfillmentFee: numberOrNull(first(row, ["fulfillment-fee-per-unit", "fba-fulfillment-fee-per-unit", "estimated-fulfillment-fee-per-item", "estimated-fulfillment-fee-per-unit"])),
       fulfillmentFeeRate: rateOrNull(first(row, ["fulfillment-fee-rate", "fba-fulfillment-fee-rate", "fba配送费比例"])),
+      clearancePriceRate: rateOrNull(first(row, ["clearance-price-rate", "clearance-price-percent", "清货售价比例"])),
+      advertisingCostRate: rateOrNull(first(row, ["advertising-cost-rate", "acos", "广告费率", "广告费比例"])),
+      advertisingCostPerUnit: numberOrNull(first(row, ["advertising-cost-per-unit", "ad-cost-per-unit", "单件广告费"])),
+      clearanceSales30: numberOrNull(first(row, ["clearance-sales-30", "clearance-30-day-sales", "清货预计30日销量"])),
       ageMode: "grouped",
       age: {
         "0-180": valueOrZero(first(row, ["inv-age-0-to-90-days"])) + valueOrZero(first(row, ["inv-age-91-to-180-days"])),
@@ -237,6 +242,10 @@ function rowToSource(type, row, rule) {
       fulfillmentFeeRate: rateOrNull(first(row, ["fulfillment-fee-rate", "fba-fulfillment-fee-rate", "fba配送费比例"])),
       firstMileCost: numberOrNull(first(row, ["first-mile-cost", "first-leg-cost", "inbound-cost", "单件头程"])),
       firstMileRate: rateOrNull(first(row, ["first-mile-cost-rate", "first-mile-rate", "头程占售价比例"])),
+      clearancePriceRate: rateOrNull(first(row, ["clearance-price-rate", "clearance-price-percent", "清货售价比例"])),
+      advertisingCostRate: rateOrNull(first(row, ["advertising-cost-rate", "acos", "广告费率", "广告费比例"])),
+      advertisingCostPerUnit: numberOrNull(first(row, ["advertising-cost-per-unit", "ad-cost-per-unit", "单件广告费"])),
+      clearanceSales30: numberOrNull(first(row, ["clearance-sales-30", "clearance-30-day-sales", "清货预计30日销量"])),
     };
   }
   return null;
@@ -439,6 +448,74 @@ export function forecastHolding(item, rule, horizonDays, currentMonth, salesMult
   };
 }
 
+export function forecastAdvertisingClearance(item, rule, horizonDays, currentMonth, salesMultiplier = 1) {
+  const sales30 = Number.isFinite(item.clearanceSales30) ? Math.max(0, item.clearanceSales30) : null;
+  const clearancePrice = Number.isFinite(item.clearancePrice) && item.clearancePrice > 0 ? item.clearancePrice : null;
+  const referralFeePerUnit = Number.isFinite(item.clearanceReferralFeePerUnit) ? item.clearanceReferralFeePerUnit : null;
+  const fulfillmentFeePerUnit = Number.isFinite(item.fulfillmentFee) ? item.fulfillmentFee : null;
+  const advertisingCostPerUnit = Number.isFinite(item.advertisingCostPerUnit) ? item.advertisingCostPerUnit : null;
+  const ready = item.actionUnits <= 0 || [sales30, clearancePrice, referralFeePerUnit, fulfillmentFeePerUnit, advertisingCostPerUnit]
+    .every((value) => Number.isFinite(value));
+  if (!ready) {
+    return {
+      horizonDays,
+      salesMultiplier,
+      expectedSoldUnits: null,
+      remainingUnits: null,
+      clearanceRevenue: null,
+      clearanceReferralFee: null,
+      fulfillmentFeeTotal: null,
+      advertisingSpend: null,
+      totalHoldingCost: null,
+      exitLiquidationNet: null,
+      clearanceCashValue: null,
+      clearanceNetAfterCosts: null,
+      maxAdvertisingSpend: null,
+      maxAdvertisingCostPerUnit: null,
+      ready: false,
+    };
+  }
+  const clearanceNetPerUnit = clearancePrice - referralFeePerUnit - fulfillmentFeePerUnit - advertisingCostPerUnit;
+  const baseForecast = forecastHolding({
+    ...item,
+    sales30,
+    normalSaleNetPerUnit: clearanceNetPerUnit,
+  }, rule, horizonDays, currentMonth, salesMultiplier);
+  const expectedSoldUnits = baseForecast.expectedSoldUnits;
+  const clearanceRevenue = expectedSoldUnits * clearancePrice;
+  const clearanceReferralFee = expectedSoldUnits * referralFeePerUnit;
+  const fulfillmentFeeTotal = expectedSoldUnits * fulfillmentFeePerUnit;
+  const advertisingSpend = expectedSoldUnits * advertisingCostPerUnit;
+  const historicalCosts = Number.isFinite(item.knownProductCost) && Number.isFinite(item.knownFirstMileCost)
+    ? item.knownProductCost + item.knownFirstMileCost
+    : null;
+  const clearanceCashValue = baseForecast.holdThenLiquidateValue;
+  const clearanceNetAfterCosts = Number.isFinite(clearanceCashValue) && Number.isFinite(historicalCosts)
+    ? clearanceCashValue - historicalCosts
+    : null;
+  const cashBeforeAdvertising = Number.isFinite(clearanceCashValue) ? clearanceCashValue + advertisingSpend : null;
+  const maxAdvertisingSpend = Number.isFinite(cashBeforeAdvertising) && Number.isFinite(item.liquidationNet)
+    ? cashBeforeAdvertising - item.liquidationNet
+    : null;
+  const maxAdvertisingCostPerUnit = expectedSoldUnits > 0 && Number.isFinite(maxAdvertisingSpend)
+    ? maxAdvertisingSpend / expectedSoldUnits
+    : null;
+  return {
+    ...baseForecast,
+    clearancePrice,
+    clearanceNetPerUnit,
+    clearanceRevenue,
+    clearanceReferralFee,
+    fulfillmentFeeTotal,
+    advertisingSpend,
+    clearanceCashValue,
+    clearanceNetAfterCosts,
+    maxAdvertisingSpend,
+    maxAdvertisingCostPerUnit,
+    ready: Number.isFinite(clearanceNetAfterCosts),
+  };
+}
+
 function breakEvenDays(item, rule, currentMonth, limitDays = 365) {
   if (item.actionUnits <= 0 || !Number.isFinite(item.liquidationNet)) return null;
   for (let horizonDays = 1; horizonDays <= limitDays; horizonDays += 1) {
@@ -485,7 +562,7 @@ function mergeDefined(target, source) {
 function mergeMissing(target, source) {
   for (const [key, value] of Object.entries(source)) {
     const missing = target[key] === null || target[key] === undefined || target[key] === "";
-    const emptyNumeric = ["price", "productCost", "productCostRate", "firstMileCost", "firstMileRate", "fulfillmentFee", "fulfillmentFeeRate", "referralFee"].includes(key) && !Number.isFinite(target[key]);
+    const emptyNumeric = ["price", "productCost", "productCostRate", "firstMileCost", "firstMileRate", "fulfillmentFee", "fulfillmentFeeRate", "referralFee", "clearancePriceRate", "advertisingCostRate", "advertisingCostPerUnit", "clearanceSales30"].includes(key) && !Number.isFinite(target[key]);
     if ((missing || emptyNumeric) && value !== null && value !== undefined && value !== "") target[key] = value;
   }
 }
@@ -557,6 +634,12 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
   const defaultProductCostRate = rateOrNull(options.defaultProductCostRate);
   const defaultFulfillmentFeeRate = rateOrNull(options.defaultFulfillmentFeeRate);
   const defaultFirstMileRate = rateOrNull(options.defaultFirstMileRate);
+  const defaultClearancePriceRate = rateOrNull(options.defaultClearancePriceRate);
+  const defaultAdvertisingCostRate = rateOrNull(options.defaultAdvertisingCostRate);
+  const defaultClearanceSalesMultiplier = Number.isFinite(Number(options.defaultClearanceSalesMultiplier))
+    && Number(options.defaultClearanceSalesMultiplier) >= 0
+    ? Number(options.defaultClearanceSalesMultiplier)
+    : null;
   const analyzed = [...items.values()].map((item, index) => {
     const available = Number.isFinite(item.available) ? Math.max(0, item.available) : sumAge(item.age);
     const salesInputReady = Number.isFinite(item.sales30);
@@ -578,6 +661,13 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
     normalized.productCostRate = Number.isFinite(normalized.productCostRate) ? normalized.productCostRate : defaultProductCostRate;
     normalized.fulfillmentFeeRate = Number.isFinite(normalized.fulfillmentFeeRate) ? normalized.fulfillmentFeeRate : defaultFulfillmentFeeRate;
     normalized.firstMileRate = Number.isFinite(normalized.firstMileRate) ? normalized.firstMileRate : defaultFirstMileRate;
+    normalized.clearancePriceRate = Number.isFinite(normalized.clearancePriceRate) ? normalized.clearancePriceRate : defaultClearancePriceRate;
+    normalized.advertisingCostRate = Number.isFinite(normalized.advertisingCostRate) ? normalized.advertisingCostRate : defaultAdvertisingCostRate;
+    normalized.clearanceSales30 = Number.isFinite(normalized.clearanceSales30)
+      ? Math.max(0, normalized.clearanceSales30)
+      : Number.isFinite(defaultClearanceSalesMultiplier) && normalized.salesInputReady
+        ? normalized.sales30 * defaultClearanceSalesMultiplier
+        : null;
     normalized.productCost = Number.isFinite(normalized.productCost)
       ? normalized.productCost
       : Number.isFinite(normalized.productCostRate) && normalized.price > 0
@@ -593,6 +683,26 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
       : Number.isFinite(normalized.firstMileRate) && normalized.price > 0
         ? normalized.price * normalized.firstMileRate
         : null;
+    normalized.clearancePrice = Number.isFinite(normalized.clearancePriceRate) && normalized.price > 0
+      ? normalized.price * normalized.clearancePriceRate
+      : null;
+    normalized.advertisingCostPerUnit = Number.isFinite(normalized.advertisingCostPerUnit)
+      ? normalized.advertisingCostPerUnit
+      : Number.isFinite(normalized.advertisingCostRate) && Number.isFinite(normalized.clearancePrice)
+        ? normalized.clearancePrice * normalized.advertisingCostRate
+        : null;
+    const referralRate = normalized.price > 0 && Number.isFinite(normalized.referralFee)
+      ? normalized.referralFee / normalized.price
+      : null;
+    normalized.clearanceReferralFeePerUnit = Number.isFinite(referralRate) && Number.isFinite(normalized.clearancePrice)
+      ? normalized.clearancePrice * referralRate
+      : null;
+    normalized.clearanceNetPerUnit = Number.isFinite(normalized.clearancePrice)
+      && Number.isFinite(normalized.clearanceReferralFeePerUnit)
+      && Number.isFinite(normalized.fulfillmentFee)
+      && Number.isFinite(normalized.advertisingCostPerUnit)
+      ? normalized.clearancePrice - normalized.clearanceReferralFeePerUnit - normalized.fulfillmentFee - normalized.advertisingCostPerUnit
+      : null;
     normalized.aged = agedUnits(normalized, rule);
     normalized.actionUnits = normalized.aged;
     normalized.storageEstimate = monthlyStorage(normalized, rule, month);
@@ -636,6 +746,7 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
     normalized.liquidationNetAfterCosts = normalized.liquidationBookProfit;
     Object.assign(normalized, calculateRisk(normalized, rule));
     normalized.forecasts = FORECAST_HORIZONS.map((horizonDays) => forecastHolding(normalized, rule, horizonDays, month));
+    normalized.clearanceForecasts = FORECAST_HORIZONS.map((horizonDays) => forecastAdvertisingClearance(normalized, rule, horizonDays, month));
     const missingFields = [];
     if (!normalized.salesInputReady) missingFields.push("30日销量");
     if (!(normalized.price > 0)) missingFields.push("售价");
@@ -821,6 +932,7 @@ export function createDemoAnalysis(marketplace = "US", options = {}) {
     { fileName: "脱敏演示收费.xlsx", sheetName: "Demo", type: "charge", label: REPORT_LABELS.charge, rows: charge },
     { fileName: "脱敏演示成本.xlsx", sheetName: "Demo", type: "costs", label: REPORT_LABELS.costs, rows: costs },
   ], marketplace, {
+    ...options,
     month: options.month ?? (Number.isFinite(parsedDemoDate.getTime()) ? parsedDemoDate.getMonth() + 1 : 7),
     analysisDate: demoAnalysisDate,
   });
@@ -828,15 +940,23 @@ export function createDemoAnalysis(marketplace = "US", options = {}) {
 
 export function exportRowsToCsv(rows, currency, options = {}) {
   const excludedSkus = new Set(options.excludedSkus || []);
+  const decisions = options.decisions || {};
   const forecastHeaders = FORECAST_HORIZONS.flatMap((horizonDays) => [
     `Hold${horizonDays}ExpectedSoldUnits`, `Hold${horizonDays}RemainingUnits`,
     `Hold${horizonDays}BaseStorage_${currency}`, `Hold${horizonDays}AgedSurcharge_${currency}`,
     `Hold${horizonDays}TotalHoldingCost_${currency}`, `Hold${horizonDays}ThenLiquidateValue_${currency}`,
     `Hold${horizonDays}Recommendation`,
   ]);
-  const headers = ["SKU", "ASIN", "Product", "Risk", "Action", "MissingFields", "DecisionScope", "Available", "Sales30", "DaysSupply", "AgedUnits", "ActionUnits_AgedOnly", "ExcessUnits", `SalePrice_${currency}`, "ProductCostRate", `ProductCost_${currency}`, "FBAFulfillmentFeeRate", `FBAFulfillmentFee_${currency}`, "FirstMileRate", `FirstMileCost_${currency}`, `NormalSaleNetPerUnit_${currency}`, `NormalSaleFullProfitPerUnit_${currency}`, `Storage_${currency}`, `AgedFee_${currency}`, `LiquidationGross_${currency}`, `LiquidationReferralFee_${currency}`, `LiquidationProcessingFee_${currency}`, `LiquidationTotalFee_${currency}`, `LiquidationCashRecovery_${currency}`, `LiquidationNetAfterCosts_${currency}`, `AmazonRemovalFee_${currency}`, `RemovalTotalLoss_${currency}`, "BreakEvenDays", ...forecastHeaders];
+  const clearanceForecastHeaders = FORECAST_HORIZONS.flatMap((horizonDays) => [
+    `AdClearance${horizonDays}ExpectedSoldUnits`, `AdClearance${horizonDays}RemainingUnits`,
+    `AdClearance${horizonDays}AdvertisingSpend_${currency}`, `AdClearance${horizonDays}HoldingCost_${currency}`,
+    `AdClearance${horizonDays}CashValue_${currency}`, `AdClearance${horizonDays}NetAfterCosts_${currency}`,
+    `AdClearance${horizonDays}MaxAdCostPerUnit_${currency}`,
+  ]);
+  const headers = ["SKU", "ASIN", "Product", "Risk", "Action", "MissingFields", "DecisionScope", "SelectedHorizonDays", "SelectedSalesScenario", "SelectedDecision", `SelectedNormalNetAfterCosts_${currency}`, `SelectedAdClearanceNetAfterCosts_${currency}`, `SelectedLiquidationNetAfterCosts_${currency}`, "Available", "Sales30", "DaysSupply", "AgedUnits", "ActionUnits_AgedOnly", "ExcessUnits", `SalePrice_${currency}`, "ProductCostRate", `ProductCost_${currency}`, "FBAFulfillmentFeeRate", `FBAFulfillmentFee_${currency}`, "FirstMileRate", `FirstMileCost_${currency}`, "ClearancePriceRate", `ClearancePrice_${currency}`, "AdvertisingCostRate", `AdvertisingCostPerUnit_${currency}`, "ClearanceSales30", `ClearanceNetPerUnit_${currency}`, `NormalSaleNetPerUnit_${currency}`, `NormalSaleFullProfitPerUnit_${currency}`, `Storage_${currency}`, `AgedFee_${currency}`, `LiquidationGross_${currency}`, `LiquidationReferralFee_${currency}`, `LiquidationProcessingFee_${currency}`, `LiquidationTotalFee_${currency}`, `LiquidationCashRecovery_${currency}`, `LiquidationNetAfterCosts_${currency}`, `AmazonRemovalFee_${currency}`, `RemovalTotalLoss_${currency}`, "BreakEvenDays", ...forecastHeaders, ...clearanceForecastHeaders];
   const escape = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
   const lines = rows.map((row) => {
+    const selectedDecision = decisions[row.sku] || {};
     const forecastValues = FORECAST_HORIZONS.flatMap((horizonDays) => {
       const forecast = row.forecasts.find((item) => item.horizonDays === horizonDays);
       return [
@@ -845,13 +965,23 @@ export function exportRowsToCsv(rows, currency, options = {}) {
         forecast.recommendation.label,
       ];
     });
-    return [row.sku, row.asin, row.product, row.risk, row.action, (row.missingFields || []).join("、"), excludedSkus.has(row.sku) ? "Excluded" : "Included", row.available, row.sales30,
+    const clearanceForecastValues = FORECAST_HORIZONS.flatMap((horizonDays) => {
+      const forecast = row.clearanceForecasts?.find((item) => item.horizonDays === horizonDays) || {};
+      return [
+        forecast.expectedSoldUnits, forecast.remainingUnits, forecast.advertisingSpend,
+        forecast.totalHoldingCost, forecast.clearanceCashValue, forecast.clearanceNetAfterCosts,
+        forecast.maxAdvertisingCostPerUnit,
+      ];
+    });
+    return [row.sku, row.asin, row.product, row.risk, row.action, (row.missingFields || []).join("、"), excludedSkus.has(row.sku) ? "Excluded" : "Included", options.selectedHorizonDays, options.selectedSalesScenario, selectedDecision.label, selectedDecision.holdNetAfterCosts, selectedDecision.advertisingNetAfterCosts, selectedDecision.liquidationNetAfterCosts, row.available, row.sales30,
     row.daysSupply, row.aged, row.actionUnits, row.excess, row.price, row.productCostRate, row.productCost,
     row.fulfillmentFeeRate, row.fulfillmentFee, row.firstMileRate, row.firstMileCost,
+    row.clearancePriceRate, row.clearancePrice, row.advertisingCostRate, row.advertisingCostPerUnit,
+    row.clearanceSales30, row.clearanceNetPerUnit,
     row.normalSaleNetPerUnit, row.normalSaleFullProfitPerUnit,
     row.storageEstimate, row.agedFee, row.liquidationGross, row.liquidationReferral, row.liquidationProcessing,
     row.liquidationFee, row.liquidationNet, row.liquidationNetAfterCosts, row.removalFee, row.removalTotalLoss,
-    row.breakEvenDays, ...forecastValues,
+    row.breakEvenDays, ...forecastValues, ...clearanceForecastValues,
   ].map(escape).join(",");
   });
   return ["\ufeff" + headers.join(","), ...lines].join("\r\n");

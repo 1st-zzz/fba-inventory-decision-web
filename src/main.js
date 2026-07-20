@@ -5,6 +5,7 @@ import {
   DETAILED_AGE_BUCKETS,
   exportRowsToCsv,
   FORECAST_HORIZONS,
+  forecastAdvertisingClearance,
   forecastHolding,
   SALES_SCENARIOS,
   workbookToSources,
@@ -82,7 +83,7 @@ root.innerHTML = `
       <div>
         <p class="eyebrow">FBA INVENTORY DECISION WORKSPACE</p>
         <h1>FBA 库存处置决策</h1>
-        <p>上传运营报告，核对数据覆盖，判断计费库龄库存应继续持有还是立即清算。</p>
+        <p>上传运营报告，核对数据覆盖，比较正常销售、广告清货、立即清算与移除。</p>
       </div>
       <div class="header-meta"><span>四国费率</span><span>本地处理</span><span>可审计导出</span></div>
     </section>
@@ -100,12 +101,21 @@ root.innerHTML = `
         <label>头程（%）<input id="first-mile-rate" type="number" min="0" max="100" step="0.1" placeholder="例如 8" /></label>
         <button id="template-button" class="link-button" type="button">下载成本模板</button>
       </div>
+      <details class="clearance-settings" open>
+        <summary><span><b>广告清货路径</b><small>可选；三项填写完整后才参与最终推荐</small></span><em>设置清货参数</em></summary>
+        <div class="clearance-settings-body">
+          <label>清货售价（现价%）<input id="clearance-price-rate" type="number" min="0.1" max="100" step="0.1" placeholder="例如 70" /></label>
+          <label>广告费（清货销售额%）<input id="advertising-cost-rate" type="number" min="0" max="100" step="0.1" placeholder="例如 20" /></label>
+          <label>清货销量（当前30日%）<input id="clearance-sales-rate" type="number" min="0" max="1000" step="1" placeholder="例如 150" /></label>
+          <p><b>广告费不混入采购成本。</b>系统会单独计算降价、广告费和新增仓储费，并与正常销售、现在清算比较。成本模板可按 SKU 覆盖这三项，其中 <code>clearance-sales-30</code> 填预计 30 日件数。</p>
+        </div>
+      </details>
       <div class="upload-layout">
         <label class="dropzone" id="dropzone"><input id="file-input" type="file" multiple accept=".xlsx,.xls,.xltx,.csv,.tsv" /><span class="upload-icon">＋</span><span><strong>拖入或选择多个运营报告</strong><small>支持分多次选择；建议包含库存、库龄、收费、佣金和商品报告</small></span></label>
         <div class="upload-side">
           <div id="selected-files" class="selected-files"></div>
           <div class="upload-actions"><button id="analyze-button" class="primary-button" disabled>开始本地分析</button><button id="clear-button" class="secondary-button" disabled>清空文件</button><button id="demo-button" class="secondary-button">查看脱敏演示</button></div>
-          <p class="privacy-note">文件只在当前浏览器处理。采购成本和头程会在两个处置方案中按同一批库存扣除，避免只影响其中一个方案。</p>
+          <p class="privacy-note">文件只在当前浏览器处理。采购成本和头程会在各收益方案中按同一批库存扣除，避免只影响其中一个方案。</p>
         </div>
       </div>
       <details class="report-source-guide">
@@ -201,20 +211,20 @@ root.innerHTML = `
           <div class="filters">
             <input id="search-input" type="search" placeholder="搜索 SKU / ASIN / 商品" />
             <select id="risk-filter" aria-label="风险筛选"><option>全部</option><option>高</option><option>中</option><option>低</option></select>
-            <select id="action-filter" aria-label="建议动作筛选"><option value="all">全部动作</option><option value="liquidate">立即清算</option><option value="hold">继续持有</option><option value="none">无需处理</option><option value="pending">待补数据</option></select>
+            <select id="action-filter" aria-label="建议动作筛选"><option value="all">全部动作</option><option value="liquidate">立即清算</option><option value="advertise">广告清货</option><option value="hold">继续持有</option><option value="none">无需处理</option><option value="pending">待补数据</option></select>
             <select id="sort-mode" aria-label="排序方式"><option value="impact">按经济影响排序</option><option value="holding">按继续放置费排序</option><option value="break-even">按最晚处理日排序</option><option value="sku">按 SKU 排序</option></select>
             <button id="execution-export-button" class="text-button" type="button">下载当前清单</button>
           </div>
         </div>
         <div class="table-scroll"><table><thead><tr>
           <th>SKU / 商品</th><th>风险</th><th>可售</th><th>30日销量</th><th>计费库龄</th><th>期末剩余</th>
-          <th>继续放置费</th><th>最晚处理窗口</th><th>清算净回收（已扣成本/头程）</th><th>移除总损失</th><th>建议动作</th>
+          <th>继续放置费</th><th>最晚处理窗口</th><th>广告清货预计结果</th><th>最大广告费/件</th><th>清算净回收（已扣成本/头程）</th><th>移除总损失</th><th>建议动作</th>
         </tr></thead><tbody id="table-body"></tbody></table></div>
         <p id="table-count" class="table-count"></p>
       </section>
 
       <details class="method-panel"><summary><span>规则、口径与执行边界</span><small>展开查看计算假设与官方收费标准</small></summary><div class="method-body">
-        <div class="method-explanation"><p>推荐会对“继续销售”和“现在清算”两种方案都扣除同一批长期计费库存的采购成本与头程，再比较预计结果；继续销售还会计入正常销售净回款、期末清算回收与新增仓储费。移除因缺少移除后的回收价值和下游处理成本，只展示预计总损失，不参与推荐。采购成本与头程为内部估算占比，没有 Amazon 官方统一费率；销售佣金和 FBA 配送费以上传报告为优先。</p><div class="source-version"><span id="source-marketplace"></span><b id="source-version"></b></div></div>
+        <div class="method-explanation"><p>推荐会对“正常销售、广告清货、现在清算”统一扣除同一批长期计费库存的采购成本与头程，再比较预计结果。广告清货会单独计入降价后的销售额、广告费、佣金、FBA配送费、期末清算回收与新增仓储费；三项清货参数未填全时，该路径不会参与推荐。移除因缺少移除后的回收价值和下游处理成本，只展示预计总损失，不参与推荐。</p><div class="source-version"><span id="source-marketplace"></span><b id="source-version"></b></div></div>
         <div class="method-warnings"><h3>执行前检查</h3><ul id="warning-list"></ul></div>
         <section class="fee-source-section"><div class="fee-source-head"><div><p class="eyebrow">OFFICIAL FEE SOURCES</p><h3>各项收费标准与官方链接</h3></div><p>仅使用 Amazon 官方页面；Seller Central Help 可能要求登录。</p></div><div id="fee-source-list" class="fee-source-list"></div></section>
       </div></details>
@@ -261,6 +271,9 @@ const analysisDateInput = document.querySelector("#analysis-date");
 const productCostRateInput = document.querySelector("#product-cost-rate");
 const fulfillmentFeeRateInput = document.querySelector("#fulfillment-fee-rate");
 const firstMileRateInput = document.querySelector("#first-mile-rate");
+const clearancePriceRateInput = document.querySelector("#clearance-price-rate");
+const advertisingCostRateInput = document.querySelector("#advertising-cost-rate");
+const clearanceSalesRateInput = document.querySelector("#clearance-sales-rate");
 
 const fileKey = (file) => `${file.name}::${file.size}::${file.lastModified}`;
 
@@ -287,6 +300,9 @@ function analysisOptions() {
     defaultProductCostRate: inputRate(productCostRateInput),
     defaultFulfillmentFeeRate: inputRate(fulfillmentFeeRateInput),
     defaultFirstMileRate: inputRate(firstMileRateInput),
+    defaultClearancePriceRate: inputRate(clearancePriceRateInput),
+    defaultAdvertisingCostRate: inputRate(advertisingCostRateInput),
+    defaultClearanceSalesMultiplier: inputRate(clearanceSalesRateInput),
   };
 }
 
@@ -324,13 +340,18 @@ function rowForecast(row) {
   return forecastHolding(row, current.rule, selectedHorizon, analysisMonth, selectedSalesModel().multiplier);
 }
 
+function rowClearanceForecast(row, horizonDays = selectedHorizon, salesMultiplier = selectedSalesModel().multiplier) {
+  return forecastAdvertisingClearance(row, current.rule, horizonDays, currentAnalysisMonth(), salesMultiplier);
+}
+
 function currentAnalysisMonth() {
   return new Date(`${current.analysisDate}T00:00:00`).getMonth() + 1;
 }
 
 function rowDecision(row) {
-  if (row.actionUnits <= 0) return { key: "none", holdNetAfterCosts: 0, liquidationNetAfterCosts: 0 };
+  if (row.actionUnits <= 0) return { key: "none", holdNetAfterCosts: 0, advertisingNetAfterCosts: 0, liquidationNetAfterCosts: 0 };
   const forecast = rowForecast(row);
+  const clearanceForecast = rowClearanceForecast(row);
   const historicalCosts = Number.isFinite(row.knownProductCost) && Number.isFinite(row.knownFirstMileCost)
     ? row.knownProductCost + row.knownFirstMileCost
     : null;
@@ -339,12 +360,20 @@ function rowDecision(row) {
     : null;
   const liquidationNetAfterCosts = row.liquidationNetAfterCosts;
   if (!Number.isFinite(holdNetAfterCosts) || !Number.isFinite(liquidationNetAfterCosts) || row.decisionMissingFields.length) {
-    return { key: "pending", holdNetAfterCosts, liquidationNetAfterCosts };
+    return { key: "pending", holdNetAfterCosts, advertisingNetAfterCosts: clearanceForecast.clearanceNetAfterCosts, liquidationNetAfterCosts };
   }
+  const candidates = [
+    { key: "hold", value: holdNetAfterCosts },
+    { key: "liquidate", value: liquidationNetAfterCosts },
+  ];
+  if (clearanceForecast.ready) candidates.push({ key: "advertise", value: clearanceForecast.clearanceNetAfterCosts });
+  candidates.sort((a, b) => b.value - a.value);
   return {
-    key: holdNetAfterCosts > liquidationNetAfterCosts ? "hold" : "liquidate",
+    key: candidates[0].key,
     holdNetAfterCosts,
+    advertisingNetAfterCosts: clearanceForecast.clearanceNetAfterCosts,
     liquidationNetAfterCosts,
+    difference: candidates.length > 1 ? candidates[0].value - candidates[1].value : null,
   };
 }
 
@@ -355,24 +384,34 @@ function decisionActionRows() {
 function buildDecisionForecast(horizonDays, salesMultiplier = selectedSalesModel().multiplier, includeSensitivity = true) {
   const rows = decisionActionRows();
   const forecasts = rows.map((row) => forecastHolding(row, current.rule, horizonDays, currentAnalysisMonth(), salesMultiplier));
+  const clearanceForecasts = rows.map((row) => forecastAdvertisingClearance(row, current.rule, horizonDays, currentAnalysisMonth(), salesMultiplier));
   const sumForecast = (field) => forecasts.reduce((total, forecast) => total + (Number.isFinite(forecast[field]) ? forecast[field] : 0), 0);
+  const sumClearanceForecast = (field) => clearanceForecasts.reduce((total, forecast) => total + (Number.isFinite(forecast[field]) ? forecast[field] : 0), 0);
   const sumRows = (field) => rows.reduce((total, row) => total + (Number.isFinite(row[field]) ? row[field] : 0), 0);
   const storageReady = forecasts.filter((forecast) => Number.isFinite(forecast.totalHoldingCost)).length;
   const comparisonReady = rows.filter((row, index) => Number.isFinite(forecasts[index].holdThenLiquidateValue)
     && Number.isFinite(row.liquidationNetAfterCosts)
     && row.decisionMissingFields.length === 0).length;
   const complete = rows.length > 0 && comparisonReady === rows.length;
+  const advertisingConfigured = rows.some((row) => [row.clearancePriceRate, row.advertisingCostRate, row.advertisingCostPerUnit, row.clearanceSales30].some((value) => Number.isFinite(value)));
+  const advertisingReadyCount = clearanceForecasts.filter((forecast) => forecast.ready).length;
+  const advertisingReady = rows.length > 0 && advertisingReadyCount === rows.length;
   const historicalCosts = sumRows("knownProductCost") + sumRows("knownFirstMileCost");
   const holdCash = sumForecast("holdThenLiquidateValue");
   const holdNetAfterCosts = complete ? holdCash - historicalCosts : null;
   const liquidationCashRecovery = sumRows("liquidationNet");
   const liquidationNetAfterCosts = complete ? sumRows("liquidationNetAfterCosts") : null;
+  const advertisingCashValue = advertisingReady ? sumClearanceForecast("clearanceCashValue") : null;
+  const advertisingNetAfterCosts = complete && advertisingReady ? sumClearanceForecast("clearanceNetAfterCosts") : null;
+  const candidates = complete ? [
+    { key: "hold", label: `继续销售 ${horizonDays} 天`, value: holdNetAfterCosts },
+    { key: "liquidate", label: "立即清算", value: liquidationNetAfterCosts },
+    ...(advertisingReady ? [{ key: "advertise", label: `广告清货 ${horizonDays} 天`, value: advertisingNetAfterCosts }] : []),
+  ].sort((a, b) => b.value - a.value) : [];
   const recommendation = rows.length === 0
     ? { key: "none", label: "当前无需处理", value: 0 }
     : complete
-      ? holdNetAfterCosts > liquidationNetAfterCosts
-        ? { key: "hold", label: `继续销售 ${horizonDays} 天`, value: holdNetAfterCosts }
-        : { key: "liquidate", label: "立即清算", value: liquidationNetAfterCosts }
+      ? candidates[0]
       : { key: "pending", label: "先补全数据，再决定", value: null };
   const result = {
     horizonDays,
@@ -385,10 +424,30 @@ function buildDecisionForecast(horizonDays, salesMultiplier = selectedSalesModel
     holdNetAfterCosts,
     liquidationCashRecovery: complete ? liquidationCashRecovery : null,
     liquidationNetAfterCosts,
+    advertisingConfigured,
+    advertisingReady,
+    advertisingCashValue,
+    advertisingNetAfterCosts,
+    advertisingExpectedSoldUnits: advertisingReady ? sumClearanceForecast("expectedSoldUnits") : null,
+    advertisingRemainingUnits: advertisingReady ? sumClearanceForecast("remainingUnits") : null,
+    advertisingRevenue: advertisingReady ? sumClearanceForecast("clearanceRevenue") : null,
+    advertisingReferralFee: advertisingReady ? sumClearanceForecast("clearanceReferralFee") : null,
+    advertisingFulfillmentFee: advertisingReady ? sumClearanceForecast("fulfillmentFeeTotal") : null,
+    advertisingSpend: advertisingReady ? sumClearanceForecast("advertisingSpend") : null,
+    advertisingCostPerUnit: advertisingReady && sumClearanceForecast("expectedSoldUnits") > 0
+      ? sumClearanceForecast("advertisingSpend") / sumClearanceForecast("expectedSoldUnits")
+      : null,
+    advertisingHoldingCost: advertisingReady ? sumClearanceForecast("totalHoldingCost") : null,
+    maxAdvertisingSpend: advertisingReady ? sumClearanceForecast("maxAdvertisingSpend") : null,
+    maxAdvertisingCostPerUnit: advertisingReady && sumClearanceForecast("expectedSoldUnits") > 0
+      ? sumClearanceForecast("maxAdvertisingSpend") / sumClearanceForecast("expectedSoldUnits")
+      : null,
     knownProductCost: sumRows("knownProductCost"),
     knownFirstMileCost: sumRows("knownFirstMileCost"),
     recommendation,
-    readiness: { actionSkuCount: rows.length, storage: storageReady, comparison: comparisonReady },
+    alternatives: candidates,
+    decisionDifference: candidates.length > 1 ? candidates[0].value - candidates[1].value : null,
+    readiness: { actionSkuCount: rows.length, storage: storageReady, comparison: comparisonReady, advertising: advertisingReadyCount },
   };
   result.sensitivity = includeSensitivity
     ? SALES_SCENARIOS.map((scenario) => ({ ...scenario, ...buildDecisionForecast(horizonDays, scenario.multiplier, false) }))
@@ -411,6 +470,7 @@ function decisionBreakEvenDays(rows, salesMultiplier) {
 
 function actionLabel(key) {
   if (key === "hold") return "继续持有";
+  if (key === "advertise") return "广告清货";
   if (key === "liquidate") return "立即清算";
   if (key === "none") return "无需处理";
   return "待补数据";
@@ -464,7 +524,21 @@ function inventoryRowsForView() {
 }
 
 function downloadRows(rows, fileName) {
-  const csv = exportRowsToCsv(rows, current.rule.currency, { excludedSkus: [...excludedDecisionSkus] });
+  const decisions = Object.fromEntries(rows.map((row) => {
+    const decision = rowDecision(row);
+    return [row.sku, {
+      label: excludedDecisionSkus.has(row.sku) ? "已排除决策" : actionLabel(decision.key),
+      holdNetAfterCosts: decision.holdNetAfterCosts,
+      advertisingNetAfterCosts: decision.advertisingNetAfterCosts,
+      liquidationNetAfterCosts: decision.liquidationNetAfterCosts,
+    }];
+  }));
+  const csv = exportRowsToCsv(rows, current.rule.currency, {
+    excludedSkus: [...excludedDecisionSkus],
+    decisions,
+    selectedHorizonDays: selectedHorizon,
+    selectedSalesScenario,
+  });
   const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
   const link = document.createElement("a");
   link.href = url;
@@ -559,8 +633,7 @@ function render() {
   `;
 
   const completeComparison = forecast.readiness.actionSkuCount > 0 && forecast.readiness.comparison === forecast.readiness.actionSkuCount;
-  const comparable = Number.isFinite(forecast.holdNetAfterCosts) && Number.isFinite(forecast.liquidationNetAfterCosts);
-  const decisionDifference = comparable ? Math.abs(forecast.holdNetAfterCosts - forecast.liquidationNetAfterCosts) : null;
+  const decisionDifference = Number.isFinite(forecast.decisionDifference) ? forecast.decisionDifference : null;
   const includedDecisionRows = decisionActionRows();
   const excludedCount = excludedDecisionSkus.size;
   const recommendationTitle = summary.actionUnits <= 0
@@ -569,21 +642,23 @@ function render() {
       ? "未纳入可决策 SKU"
     : forecast.recommendation.key === "liquidate"
       ? "现在清算"
+      : forecast.recommendation.key === "advertise"
+        ? `广告清货 ${selectedHorizon} 天`
       : forecast.recommendation.key === "hold"
         ? `继续销售 ${selectedHorizon} 天`
         : "先补全数据，再决定";
   const comparisonText = includedDecisionRows.length === 0
     ? "已排除全部长期计费 SKU，请恢复至少一个 SKU 后再比较"
-    : forecast.recommendation.key === "liquidate" && decisionDifference !== null
-    ? `与继续销售 ${selectedHorizon} 天相比`
-    : forecast.recommendation.key === "hold" && decisionDifference !== null
-      ? "与现在清算相比"
+    : decisionDifference !== null && forecast.alternatives[1]
+    ? `与次优方案“${forecast.alternatives[1].label}”相比`
       : completeComparison
-        ? "两种方案的预计现金结果接近"
+        ? "可比较方案的预计现金结果接近"
         : `仍有 ${number(Math.max(0, forecast.readiness.actionSkuCount - forecast.readiness.comparison))} 个计费 SKU 缺少比较数据`;
   const filteredBreakEvenDays = decisionBreakEvenDays(includedDecisionRows, selectedSalesModel().multiplier);
   const breakEvenText = includedDecisionRows.length === 0
     ? "当前没有 SKU 纳入决策"
+    : forecast.recommendation.key === "advertise" && Number.isFinite(forecast.maxAdvertisingCostPerUnit)
+      ? `每件最大可承受广告费 ${money(forecast.maxAdvertisingCostPerUnit)}`
     : filteredBreakEvenDays
     ? filteredBreakEvenDays <= 1
       ? "从现在起继续放置已不划算"
@@ -603,29 +678,32 @@ function render() {
   document.querySelector("#recommendation-banner").className = `recommendation-banner tone-${forecast.recommendation.key}`;
   document.querySelector("#recommendation-banner").innerHTML = `
     <div><span>建议怎么做</span><h3>${escapeHtml(recommendationTitle)}</h3><p>${escapeHtml(comparisonText)}</p></div>
-    <div class="recommendation-value"><span>预计多保留现金</span><strong>${decisionDifference === null ? "待补数据" : money(decisionDifference)}</strong><small>${escapeHtml(breakEvenText)}</small></div>
+    <div class="recommendation-value"><span>预计比次优方案多保留</span><strong>${decisionDifference === null ? "待补数据" : money(decisionDifference)}</strong><small>${escapeHtml(breakEvenText)}</small></div>
   `;
 
   document.querySelector("#scenario-grid").innerHTML = `
     <article class="scenario-card hold ${forecast.recommendation.key === "hold" ? "recommended" : ""}"><div><span>方案 A · 继续销售 ${selectedHorizon} 天</span><b>${forecast.recommendation.key === "hold" ? "推荐" : "对比方案"}</b></div><p class="scenario-value-label">扣采购成本和头程后的预计结果</p><h3>${moneyOrPending(forecast.holdNetAfterCosts)}</h3><dl><div><dt>期间新增仓储费</dt><dd>-${moneyOrPending(forecast.totalHoldingCost)}</dd></div><div><dt>预计售出</dt><dd>${number(forecast.expectedSoldUnits)} 件</dd></div><div><dt>到期仍剩</dt><dd>${number(forecast.remainingUnits)} 件</dd></div></dl></article>
-    <article class="scenario-card liquidate ${forecast.recommendation.key === "liquidate" ? "recommended" : ""}"><div><span>方案 B · 现在清算</span><b>${forecast.recommendation.key === "liquidate" ? "推荐" : "对比方案"}</b></div><p class="scenario-value-label">扣费用、采购成本和头程后的净回收</p><h3>${moneyOrPending(forecast.liquidationNetAfterCosts)}</h3><dl><div><dt>清算现金回收</dt><dd>${moneyOrPending(forecast.liquidationCashRecovery)}</dd></div><div><dt>采购成本</dt><dd>-${money(forecast.knownProductCost)}</dd></div><div><dt>头程</dt><dd>-${money(forecast.knownFirstMileCost)}</dd></div></dl></article>
+    <article class="scenario-card advertise ${forecast.recommendation.key === "advertise" ? "recommended" : ""} ${!forecast.advertisingReady ? "pending" : ""}"><div><span>方案 B · 广告清货 ${selectedHorizon} 天</span><b>${forecast.recommendation.key === "advertise" ? "推荐" : forecast.advertisingReady ? "对比方案" : "待填写参数"}</b></div><p class="scenario-value-label">扣广告、费用、采购成本和头程后的预计结果</p><h3>${moneyOrPending(forecast.advertisingNetAfterCosts)}</h3><dl><div><dt>清货销售额</dt><dd>${moneyOrPending(forecast.advertisingRevenue)}</dd></div><div><dt>广告费</dt><dd>-${moneyOrPending(forecast.advertisingSpend)}</dd></div><div><dt>新增仓储费</dt><dd>-${moneyOrPending(forecast.advertisingHoldingCost)}</dd></div><div><dt>预计售出 / 剩余</dt><dd>${forecast.advertisingReady ? `${number(forecast.advertisingExpectedSoldUnits)} / ${number(forecast.advertisingRemainingUnits)} 件` : "待填写清货售价、广告费和销量"}</dd></div><div><dt>实际 / 最大广告费每件</dt><dd>${forecast.advertisingReady ? `${moneyOrPending(forecast.advertisingCostPerUnit)} / ${moneyOrPending(forecast.maxAdvertisingCostPerUnit)}` : "待补数据"}</dd></div></dl>${forecast.advertisingReady ? `<p class="scenario-footnote">${forecast.maxAdvertisingCostPerUnit <= 0 ? "上限≤0：即使不投广告，当前清货价也不如立即清算。" : "实际单件广告费低于最大上限时，广告清货才优于立即清算。"}</p>` : ""}</article>
+    <article class="scenario-card liquidate ${forecast.recommendation.key === "liquidate" ? "recommended" : ""}"><div><span>方案 C · 现在清算</span><b>${forecast.recommendation.key === "liquidate" ? "推荐" : "对比方案"}</b></div><p class="scenario-value-label">扣费用、采购成本和头程后的净回收</p><h3>${moneyOrPending(forecast.liquidationNetAfterCosts)}</h3><dl><div><dt>清算现金回收</dt><dd>${moneyOrPending(forecast.liquidationCashRecovery)}</dd></div><div><dt>采购成本</dt><dd>-${money(forecast.knownProductCost)}</dd></div><div><dt>头程</dt><dd>-${money(forecast.knownFirstMileCost)}</dd></div></dl></article>
   `;
 
-  const reasonText = forecast.recommendation.key === "liquidate" && decisionDifference !== null
-    ? `继续放 ${selectedHorizon} 天预计还要支付 ${money(forecast.totalHoldingCost)} 仓储费，期末仍剩 ${number(forecast.remainingUnits)} 件；现在清算预计多保留 ${money(decisionDifference)} 现金。`
+  const reasonText = forecast.recommendation.key === "advertise" && decisionDifference !== null
+    ? `按当前清货参数，${selectedHorizon} 天预计售出 ${number(forecast.advertisingExpectedSoldUnits)} 件，广告投入 ${money(forecast.advertisingSpend)}；广告清货预计比次优方案多保留 ${money(decisionDifference)}。`
+    : forecast.recommendation.key === "liquidate" && decisionDifference !== null
+    ? `综合比较正常销售${forecast.advertisingReady ? "、广告清货" : ""}与清算后，现在清算预计比“${forecast.alternatives[1]?.label || "次优方案"}”多保留 ${money(decisionDifference)}。`
     : forecast.recommendation.key === "hold" && decisionDifference !== null
-      ? `继续销售 ${selectedHorizon} 天预计售出 ${number(forecast.expectedSoldUnits)} 件，即使计入 ${money(forecast.totalHoldingCost)} 仓储费，仍比现在清算多保留 ${money(decisionDifference)} 现金。`
-      : `两种方案只完成 ${number(forecast.readiness.comparison)}/${number(forecast.readiness.actionSkuCount)} 个已纳入 SKU 的比较。请先补全上方列出的数据，或临时排除少量缺数据 SKU。`;
+      ? `继续销售 ${selectedHorizon} 天预计售出 ${number(forecast.expectedSoldUnits)} 件，计入 ${money(forecast.totalHoldingCost)} 仓储费后，仍比“${forecast.alternatives[1]?.label || "次优方案"}”多保留 ${money(decisionDifference)}。`
+      : `可比较方案只完成 ${number(forecast.readiness.comparison)}/${number(forecast.readiness.actionSkuCount)} 个已纳入 SKU 的比较。请先补全上方列出的数据，或临时排除少量缺数据 SKU。`;
   document.querySelector("#decision-reason").innerHTML = `<b>为什么：</b>${escapeHtml(reasonText)}`;
   const sensitivityKeys = forecast.sensitivity.map((scenario) => scenario.recommendation.key);
   const sensitivityStable = sensitivityKeys.length > 0 && sensitivityKeys.every((key) => key === sensitivityKeys[0]) && sensitivityKeys[0] !== "pending";
-  const sensitivityRecommendation = sensitivityKeys[0] === "liquidate" ? "现在清算" : sensitivityKeys[0] === "hold" ? `继续销售 ${selectedHorizon} 天` : "待补数据";
+  const sensitivityRecommendation = sensitivityKeys[0] === "liquidate" ? "现在清算" : sensitivityKeys[0] === "advertise" ? `广告清货 ${selectedHorizon} 天` : sensitivityKeys[0] === "hold" ? `继续销售 ${selectedHorizon} 天` : "待补数据";
   const activeSalesLabel = selectedSalesScenario === "conservative" ? "销量下降 30%" : selectedSalesScenario === "optimistic" ? "销量提高 30%" : "基准销量";
   document.querySelector("#sensitivity-conclusion").textContent = sensitivityStable
     ? `当前使用“${activeSalesLabel}”。三种销量情景下，建议都仍是“${sensitivityRecommendation}”。`
     : `当前使用“${activeSalesLabel}”。不同销量情景会改变结论，请切换查看。`;
   document.querySelector("#sensitivity-grid").innerHTML = forecast.sensitivity.map((scenario) => `
-    <button type="button" class="sensitivity-item ${scenario.key === selectedSalesScenario ? "active" : ""}" data-sales-scenario="${scenario.key}" aria-pressed="${scenario.key === selectedSalesScenario}"><div><span>销量 ${scenario.multiplier === 1 ? "不变" : scenario.multiplier < 1 ? "下降 30%" : "提高 30%"}</span><b>${scenario.recommendation.key === "liquidate" ? "现在清算" : scenario.recommendation.key === "hold" ? `继续销售 ${selectedHorizon} 天` : "待补数据"}</b></div><small>继续销售后的现金结果 ${moneyOrPending(scenario.holdThenLiquidateValue)}</small></button>
+    <button type="button" class="sensitivity-item ${scenario.key === selectedSalesScenario ? "active" : ""}" data-sales-scenario="${scenario.key}" aria-pressed="${scenario.key === selectedSalesScenario}"><div><span>销量 ${scenario.multiplier === 1 ? "不变" : scenario.multiplier < 1 ? "下降 30%" : "提高 30%"}</span><b>${scenario.recommendation.key === "liquidate" ? "现在清算" : scenario.recommendation.key === "advertise" ? `广告清货 ${selectedHorizon} 天` : scenario.recommendation.key === "hold" ? `继续销售 ${selectedHorizon} 天` : "待补数据"}</b></div><small>推荐方案预计结果 ${moneyOrPending(scenario.recommendation.value)}</small></button>
   `).join("");
 
   document.querySelector("#forecast-coverage").textContent = `费用覆盖 ${number(forecast.readiness.storage)}/${number(forecast.readiness.actionSkuCount)} 个计费 SKU`;
@@ -656,13 +734,14 @@ function render() {
   const rows = filteredRows();
   document.querySelector("#table-body").innerHTML = rows.map((row) => {
     const itemForecast = rowForecast(row);
+    const clearanceForecast = rowClearanceForecast(row);
     const decision = rowDecision(row);
     const breakEven = row.actionUnits <= 0 ? "—" : row.breakEvenDays ? (row.breakEvenDays <= 1 ? "立即" : `${row.breakEvenDays} 天`) : ">365 天";
     const actionKey = excludedDecisionSkus.has(row.sku) ? "excluded" : decision.key;
     const actionText = actionKey === "excluded" ? "已排除决策" : actionLabel(actionKey);
-    return `<tr><td><b>${escapeHtml(row.sku)}</b><span>${escapeHtml(row.asin)}</span><small>${escapeHtml(row.product)}</small></td><td>${riskBadge(row.risk)}</td><td>${number(row.available)}</td><td>${row.salesInputReady ? number(row.sales30) : "待补"}</td><td>${number(row.actionUnits)}</td><td>${number(itemForecast.remainingUnits)}</td><td>${moneyOrPending(itemForecast.totalHoldingCost)}</td><td>${breakEven}</td><td>${moneyOrPending(row.liquidationNetAfterCosts)}</td><td>${moneyOrPending(row.removalTotalLoss)}</td><td><b class="action action-${actionKey}">${escapeHtml(actionText)}</b></td></tr>`;
+    return `<tr><td><b>${escapeHtml(row.sku)}</b><span>${escapeHtml(row.asin)}</span><small>${escapeHtml(row.product)}</small></td><td>${riskBadge(row.risk)}</td><td>${number(row.available)}</td><td>${row.salesInputReady ? number(row.sales30) : "待补"}</td><td>${number(row.actionUnits)}</td><td>${number(itemForecast.remainingUnits)}</td><td>${moneyOrPending(itemForecast.totalHoldingCost)}</td><td>${breakEven}</td><td>${moneyOrPending(clearanceForecast.clearanceNetAfterCosts)}</td><td>${moneyOrPending(clearanceForecast.maxAdvertisingCostPerUnit)}</td><td>${moneyOrPending(row.liquidationNetAfterCosts)}</td><td>${moneyOrPending(row.removalTotalLoss)}</td><td><b class="action action-${actionKey}">${escapeHtml(actionText)}</b></td></tr>`;
   }).join("");
-  document.querySelector("#table-count").textContent = `显示 ${number(rows.length)}/${number(summary.skuCount)} 个 SKU · ${selectedHorizon} 天 · ${activeSalesLabel} · CSV 含基准销量下的四个预测周期。`;
+  document.querySelector("#table-count").textContent = `显示 ${number(rows.length)}/${number(summary.skuCount)} 个 SKU · ${selectedHorizon} 天 · ${activeSalesLabel} · CSV 含正常销售与广告清货的四个预测周期。`;
 
   const warnings = current.warnings.length ? current.warnings : ["当前报告组合已覆盖主要字段；执行前仍应复核 Seller Central 费率预览。"];
   document.querySelector("#warning-list").innerHTML = warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("");
@@ -721,7 +800,7 @@ dropzone.addEventListener("drop", (event) => { appendFiles([...event.dataTransfe
 analyzeButton.addEventListener("click", () => analyzeSelectedFiles());
 clearButton.addEventListener("click", () => { selectedFiles = []; parsedSources = []; fileInput.value = ""; updateSelectedFiles(); setStatus("已清空待分析文件。", "success"); });
 document.querySelector("#template-button").addEventListener("click", () => {
-  const csv = "\ufeffseller-sku,unit-cost-rate,fulfillment-fee-rate,first-mile-cost-rate\r\nDEMO-SKU-001,30,18,8\r\n";
+  const csv = "\ufeffseller-sku,unit-cost-rate,fulfillment-fee-rate,first-mile-cost-rate,clearance-price-rate,advertising-cost-rate,clearance-sales-30\r\nDEMO-SKU-001,30,18,8,70,20,12\r\n";
   const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
   const link = document.createElement("a"); link.href = url; link.download = "fba-cost-input-template.csv"; link.click(); URL.revokeObjectURL(url);
 });
@@ -733,7 +812,7 @@ document.querySelector("#demo-button").addEventListener("click", () => {
 });
 marketplace.addEventListener("change", () => { if (!usingDemo && selectedFiles.length) analyzeSelectedFiles({ scrollToResults: false }); else recalculate(); });
 analysisDateInput.addEventListener("change", recalculate);
-for (const input of [productCostRateInput, fulfillmentFeeRateInput, firstMileRateInput]) input.addEventListener("change", recalculate);
+for (const input of [productCostRateInput, fulfillmentFeeRateInput, firstMileRateInput, clearancePriceRateInput, advertisingCostRateInput, clearanceSalesRateInput]) input.addEventListener("change", recalculate);
 document.querySelector("#forecast-chart").addEventListener("click", (event) => { const button = event.target.closest("button[data-horizon]"); if (!button) return; selectedHorizon = Number(button.dataset.horizon); render(); });
 document.querySelector("#sensitivity-grid").addEventListener("click", (event) => { const button = event.target.closest("button[data-sales-scenario]"); if (!button) return; selectedSalesScenario = button.dataset.salesScenario; render(); });
 document.querySelector("#inventory-search-input").addEventListener("input", (event) => { inventoryQuery = event.target.value.trim(); render(); });

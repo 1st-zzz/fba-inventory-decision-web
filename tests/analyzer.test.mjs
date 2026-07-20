@@ -6,6 +6,7 @@ import {
   createDemoAnalysis,
   detectReportType,
   exportRowsToCsv,
+  forecastAdvertisingClearance,
   workbookToSources,
 } from "../src/analyzer.js";
 import { MARKET_RULES } from "../src/rules.js";
@@ -132,17 +133,65 @@ test("uses global sale-price percentages for all three estimated costs", () => {
   assert.equal(row.normalSaleFullProfitPerUnit, 29);
 });
 
+test("models advertising clearance as a separate future-cash path", () => {
+  const result = analyzeSources([{
+    fileName: "demo-clearance.csv",
+    sheetName: "Sheet1",
+    type: "inventory",
+    label: "库存报告",
+    rows: [{
+      sku: "DEMO-ADS-001",
+      available: 10,
+      sales30: 2,
+      price: 100,
+      referralFee: 15,
+      fulfillmentFee: 10,
+      productCost: 30,
+      firstMileCost: 5,
+      weight: 0.4,
+      volume: 0.1,
+      sizeTier: "standard",
+      ageMode: "detailed",
+      age: { "181-210": 10 },
+    }],
+  }], "US", {
+    month: 7,
+    defaultClearancePriceRate: 70,
+    defaultAdvertisingCostRate: 20,
+    defaultClearanceSalesMultiplier: 2,
+  });
+  const row = result.rows[0];
+  assert.equal(row.clearancePrice, 70);
+  assert.equal(row.clearanceReferralFeePerUnit, 10.5);
+  assert.equal(row.advertisingCostPerUnit, 14);
+  assert.equal(row.clearanceSales30, 4);
+  assert.equal(row.clearanceNetPerUnit, 35.5);
+  const forecast = forecastAdvertisingClearance(row, result.rule, 30, 7);
+  assert.equal(forecast.ready, true);
+  assert.equal(forecast.expectedSoldUnits, 4);
+  assert.equal(forecast.remainingUnits, 6);
+  assert.equal(forecast.clearanceRevenue, 280);
+  assert.equal(forecast.clearanceReferralFee, 42);
+  assert.equal(forecast.fulfillmentFeeTotal, 40);
+  assert.equal(forecast.advertisingSpend, 56);
+  assert.equal(forecast.clearanceNetAfterCosts, forecast.clearanceCashValue - 350);
+  assert.equal(forecast.maxAdvertisingSpend, forecast.clearanceCashValue + 56 - row.liquidationNet);
+});
+
 test("parses a cost supplement and merges it by seller SKU", () => {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
-    ["seller-sku", "unit-cost-rate", "fulfillment-fee-rate", "first-mile-cost-rate"],
-    ["DEMO-COST-002", "30%", 18, "7.5%"],
+    ["seller-sku", "unit-cost-rate", "fulfillment-fee-rate", "first-mile-cost-rate", "clearance-price-rate", "advertising-cost-rate", "clearance-sales-30"],
+    ["DEMO-COST-002", "30%", 18, "7.5%", 65, 22, 8],
   ]), "Costs");
   const parsed = workbookToSources(workbook, "costs.xlsx", XLSX, "US");
   assert.equal(parsed[0].type, "costs");
   assert.equal(parsed[0].rows[0].productCostRate, 0.3);
   assert.equal(parsed[0].rows[0].fulfillmentFeeRate, 0.18);
   assert.equal(parsed[0].rows[0].firstMileRate, 0.075);
+  assert.equal(parsed[0].rows[0].clearancePriceRate, 0.65);
+  assert.equal(parsed[0].rows[0].advertisingCostRate, 0.22);
+  assert.equal(parsed[0].rows[0].clearanceSales30, 8);
 
   const result = analyzeSources([{
     fileName: "inventory.xlsx",
@@ -155,6 +204,8 @@ test("parses a cost supplement and merges it by seller SKU", () => {
   assert.equal(row.productCost, 6);
   assert.ok(Math.abs(row.fulfillmentFee - 3.6) < 1e-9);
   assert.equal(row.firstMileCost, 1.5);
+  assert.equal(row.clearancePrice, 13);
+  assert.equal(row.clearanceSales30, 8);
   assert.ok(Math.abs(row.normalSaleFullProfitPerUnit - 5.9) < 1e-9);
 });
 
@@ -211,7 +262,18 @@ test("forecasts cumulative holding cost and remaining charged inventory", () => 
 
 test("CSV export includes auditable forecasts for every decision horizon", () => {
   const result = createDemoAnalysis("US");
-  const csv = exportRowsToCsv(result.rows, result.rule.currency);
+  const csv = exportRowsToCsv(result.rows, result.rule.currency, {
+    selectedHorizonDays: 90,
+    selectedSalesScenario: "baseline",
+    decisions: {
+      "DEMO-001": {
+        label: "广告清货",
+        holdNetAfterCosts: -100,
+        advertisingNetAfterCosts: -80,
+        liquidationNetAfterCosts: -120,
+      },
+    },
+  });
   assert.match(csv, /Hold30TotalHoldingCost_USD/);
   assert.match(csv, /Hold90TotalHoldingCost_USD/);
   assert.match(csv, /Hold180TotalHoldingCost_USD/);
@@ -220,6 +282,12 @@ test("CSV export includes auditable forecasts for every decision horizon", () =>
   assert.match(csv, /MissingFields/);
   assert.match(csv, /DecisionScope/);
   assert.match(csv, /LiquidationNetAfterCosts_USD/);
+  assert.match(csv, /ClearancePriceRate/);
+  assert.match(csv, /AdvertisingCostPerUnit_USD/);
+  assert.match(csv, /AdClearance90NetAfterCosts_USD/);
+  assert.match(csv, /AdClearance180MaxAdCostPerUnit_USD/);
+  assert.match(csv, /SelectedAdClearanceNetAfterCosts_USD/);
+  assert.match(csv, /广告清货/);
 });
 
 test("identifies the exact SKU and fields missing from a decision", () => {
