@@ -1,12 +1,13 @@
 # FBA Inventory Decision Web
 
-面向运营人员的静态网页工具，用于分析 Amazon FBA 库存、库龄、仓储费、清算预计净回收与移除费。
+面向运营人员的网页工具，用于分析 Amazon FBA 库存、库龄、仓储费、清算预计净回收与移除费。上传文件和本机授权 API 报告进入同一套处置模型。
 
 ## 隐私设计
 
 - 公开仓库只包含脱敏演示数据。
 - 运营报告通过浏览器本地读取，不会上传到 GitHub 或其他服务器。
 - 页面刷新后，已选择的报告和分析结果会被清除。
+- 公开 GitHub Pages 只支持浏览器内上传文件；本机 API 模式由仅监听 `127.0.0.1` 的服务提供授权报告，不向公开站点返回卖家数据。
 
 ## 支持的文件
 
@@ -21,6 +22,29 @@
 支持 XLSX、XLS、XLTX、CSV、TSV，可分多次选择文件且不会覆盖已选文件。页面可下载成本补充模板，也可统一填写采购成本、FBA配送费和头程占当前售价的比例；成本表中的 SKU 比例优先。当前费率表覆盖 US、CA、UK、DE，页面会显示规则版本和数据缺口。
 
 页面按最新详细库龄快照展示 `0-180`、`181-210`、`211-240`、`241-270`、`271-300`、`301-330`、`331-365`、`366-455`、`456+` 各区间的库存件数和 SKU 数，并根据站点标记是否进入收费区间。
+
+上传入口下方的“这些输入文件从哪里下载？”默认收起。展开后有四张脱敏截图，分别说明库存报告、页面底部三点按钮导出库龄、月度仓储费、以及“报告 → 库存报告”分别下载所有商品报告和销售佣金预览报告。
+
+## 本机 API 数据入口
+
+在已授权的本机 Codex 中，经 Effiseller Amazon API 获取目标店铺的最新 `DONE` 报告，再将文件放在本机私有临时目录。当前入口使用以下 Amazon SP-API 报告：
+
+| 用途 | 报告类型 | 必需 |
+| --- | --- | --- |
+| 库龄、预计附加费计费件数、30 日销量、冗余库存 | `GET_FBA_INVENTORY_PLANNING_DATA` | 是 |
+| 销售佣金、FBA 配送费、重量 | `GET_FBA_ESTIMATED_FBA_FEES_TXT_DATA` | 建议 |
+| 基础仓储费、体积与尺寸分级 | `GET_FBA_STORAGE_FEE_CHARGES_DATA` | 建议 |
+| 商品和售价补充 | `GET_MERCHANT_LISTINGS_ALL_DATA` | 建议 |
+
+先运行 `pnpm run build`，再从此仓库目录启动本机服务；所有路径均指向本机私有报告，不要把真实报告放进 Git 仓库：
+
+```text
+python scripts/decision_server.py --planning-report PRIVATE/planning.tsv --fee-preview-report PRIVATE/fee-preview.tsv --storage-report PRIVATE/storage.tsv --products-report PRIVATE/products.tsv --marketplace US --display-name STORE_NAME --report-created-at ISO_TIME --port 50961
+```
+
+打开服务打印的 `127.0.0.1` 地址，选择“本机授权 API”，点击“读取 API 报告并测算”。这个按钮读取已拉取的 API 报告快照，不会向 Amazon 重新发起报告请求；要刷新快照，需先通过授权连接再次拉取最新 `DONE` 报告并重启本机服务。API 返回的 `inv-age-*` 是普通库龄库存，`quantity-to-be-charged-ais-*` 是 Amazon 预计附加费计费件数；处置数量取后者，不把两者混算。`estimated-ais-*` 为预计费用，不是实际账单。缺少采购成本、头程等字段时展示具体待补 SKU，不能把缺失视为 0。
+
+手动上传仍适用于 US、CA、UK、DE。当前本机 API 接入已对一个授权 US 店铺的报告完成实测；其他店铺/站点需按各自授权、报告字段和费率版本单独验证。
 
 “现在清算”按清算毛回收、Amazon 清算费用、清算现金回收、采购成本、头程逐项拆分，最终展示扣除成本与头程后的清算净回收。继续销售方案也扣除同一批库存的采购成本与头程，保证两个方案使用一致口径。移除方案同时展示正数的 Amazon 移除费，以及负数表示的移除总损失（采购成本、头程和 Amazon 移除费）；缺少移除后回收价值时不参与最终收益比较。
 

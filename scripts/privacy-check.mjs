@@ -3,7 +3,7 @@ import path from "node:path";
 
 const root = process.cwd();
 const ignored = new Set(["node_modules", "dist", ".git"]);
-const allowedExtensions = new Set([".js", ".mjs", ".html", ".css", ".json", ".md", ".yml", ".yaml"]);
+const allowedExtensions = new Set([".js", ".mjs", ".html", ".css", ".json", ".md", ".py", ".yml", ".yaml"]);
 const findings = [];
 
 function scan(directory) {

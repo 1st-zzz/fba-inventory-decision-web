@@ -2,7 +2,6 @@ import "./styles.css";
 import {
   analyzeSources,
   createDemoAnalysis,
-  DETAILED_AGE_BUCKETS,
   exportRowsToCsv,
   FORECAST_HORIZONS,
   forecastAdvertisingClearance,
@@ -18,6 +17,8 @@ let parsedSources = [];
 let selectedFiles = [];
 let current = createDemoAnalysis("US", { analysisDate: today });
 let usingDemo = true;
+let activeSource = "demo";
+let apiManifest = null;
 let inventoryQuery = "";
 let query = "";
 let riskFilter = "全部";
@@ -26,6 +27,9 @@ let sortMode = "impact";
 let selectedHorizon = 90;
 let selectedSalesScenario = "baseline";
 let inventoryMetricFilter = "all";
+let inventoryPage = 1;
+let decisionPage = 1;
+const PAGE_SIZE = 100;
 const excludedDecisionSkus = new Set();
 let xlsxModule;
 
@@ -56,8 +60,16 @@ const moneyOrPending = (value) => Number.isFinite(value) ? money(value) : "待�
 
 const dateLabel = (value) => {
   if (!value) return "";
-  if (value instanceof Date && Number.isFinite(value.getTime())) return value.toISOString().slice(0, 10);
+  if (value instanceof Date && Number.isFinite(value.getTime())) {
+    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+  }
   return String(value).slice(0, 10);
+};
+const reportTimeLabel = (value) => {
+  if (!value) return "";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return dateLabel(value);
+  return `${new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(date)}（北京时间）`;
 };
 
 root.innerHTML = `
@@ -74,7 +86,7 @@ root.innerHTML = `
         <button type="button" data-font-scale="1" title="标准字体" aria-label="使用标准字体">A</button>
         <button type="button" data-font-scale="1.15" title="大号字体" aria-label="使用大号字体">A＋</button>
       </div>
-      <div class="privacy-pill"><span></span>文件仅在当前浏览器处理</div>
+      <div class="privacy-pill"><span></span>数据仅在本机处理</div>
     </div>
   </header>
 
@@ -83,14 +95,14 @@ root.innerHTML = `
       <div>
         <p class="eyebrow">FBA INVENTORY DECISION WORKSPACE</p>
         <h1>FBA 库存处置决策</h1>
-        <p>上传运营报告，核对数据覆盖，比较正常销售、广告清货、立即清算与移除。</p>
+        <p>上传运营报告或读取本机授权 API，核对数据覆盖，比较正常销售、广告清货、立即清算与移除。</p>
       </div>
       <div class="header-meta"><span>四国费率</span><span>本地处理</span><span>可审计导出</span></div>
     </section>
 
     <section class="intake-panel" id="setup">
       <div class="section-heading">
-        <div><p class="eyebrow">STEP 01 · INPUT</p><h2>上传报告并设置口径</h2></div>
+        <div><p class="eyebrow">STEP 01 · INPUT</p><h2>选择数据来源并设置口径</h2></div>
         <span class="local-badge">US / CA / UK / DE · XLSX / CSV</span>
       </div>
       <div class="control-strip">
@@ -110,6 +122,11 @@ root.innerHTML = `
           <p><b>广告费不混入采购成本。</b>系统会单独计算降价、广告费和新增仓储费，并与正常销售、现在清算比较。成本模板可按 SKU 覆盖这三项，其中 <code>clearance-sales-30</code> 填预计 30 日件数。</p>
         </div>
       </details>
+      <div class="source-route" role="group" aria-label="选择数据来源">
+        <button type="button" class="source-route-button active" data-source-route="upload" aria-pressed="true"><b>上传文件</b><small>适合任意店铺；保留 Seller Central 下载截图指引</small></button>
+        <button type="button" class="source-route-button" data-source-route="api" aria-pressed="false"><b>本机授权 API</b><small>读取已有授权报告，再进入同一套处置测算</small></button>
+      </div>
+      <div id="manual-input-panel">
       <div class="upload-layout">
         <label class="dropzone" id="dropzone"><input id="file-input" type="file" multiple accept=".xlsx,.xls,.xltx,.csv,.tsv" /><span class="upload-icon">＋</span><span><strong>拖入或选择多个运营报告</strong><small>支持分多次选择；建议包含库存、库龄、收费、佣金和商品报告</small></span></label>
         <div class="upload-side">
@@ -142,6 +159,11 @@ root.innerHTML = `
           </div>
         </div>
       </details>
+      </div>
+      <div id="api-input-panel" class="api-input-panel" hidden>
+        <div><b>从本机授权 API 读取报告</b><p id="api-source-status">正在检查本机数据连接…</p><small>公开 GitHub 网页不会持有授权或卖家数据。API 只通过本机入口读取；采购成本、头程与广告清货参数仍由上方填写或成本模板补充。</small></div>
+        <button id="api-analyze-button" class="primary-button" type="button" disabled>读取 API 报告并测算</button>
+      </div>
     </section>
 
     <section class="workspace" id="inventory-overview">
@@ -174,6 +196,7 @@ root.innerHTML = `
             <th>SKU / 商品</th><th>可售</th><th>调拨中</th><th>30日销量</th><th>预计冗余</th><th>长期计费</th>
             <th>0–180天</th><th>181–210天</th><th>211–240天</th><th>241–270天</th><th>271–300天</th><th>301–330天</th><th>331–365天</th><th>366–455天</th><th>456天以上</th>
           </tr></thead><tbody id="inventory-table-body"></tbody></table></div>
+          <div id="inventory-pagination" class="table-pagination"></div>
           <p class="inventory-detail-note">“—”表示该 SKU 未识别到详细库龄区间；长期计费库存仍按当前站点规则计算。</p>
         </section>
       </section>
@@ -220,6 +243,7 @@ root.innerHTML = `
           <th>SKU / 商品</th><th>风险</th><th>可售</th><th>30日销量</th><th>计费库龄</th><th>期末剩余</th>
           <th>继续放置费</th><th>最晚处理窗口</th><th>广告清货预计结果</th><th>最大广告费/件</th><th>清算净回收（已扣成本/头程）</th><th>移除总损失</th><th>建议动作</th>
         </tr></thead><tbody id="table-body"></tbody></table></div>
+        <div id="decision-pagination" class="table-pagination"></div>
         <p id="table-count" class="table-count"></p>
       </section>
 
@@ -231,7 +255,7 @@ root.innerHTML = `
     </section>
   </main>
 
-  <footer><span>FBA 库存决策台</span><p>公开页面仅含脱敏演示数据 · 不会自动创建清算或移除订单</p></footer>
+  <footer><span>FBA 库存决策台</span><p id="footer-privacy">公开页面仅含脱敏演示数据 · 不会自动创建清算或移除订单</p></footer>
 `;
 
 const FONT_SCALE_KEY = "fba-inventory-font-scale";
@@ -554,18 +578,18 @@ function confidenceModel(summary, forecast) {
   const completeStorage = forecast.readiness.storage === forecast.readiness.actionSkuCount;
   const detailedAge = summary.readiness.detailedAge === summary.skuCount;
   if (completeComparison && completeStorage && detailedAge) return { level: "高", tone: "high", note: "关键费用和库龄覆盖完整" };
-  if (forecast.readiness.comparison > 0 && completeStorage) return { level: "中", tone: "medium", note: `${number(summary.missingSkuDetails.length)} 个 SKU 缺少销售或成本口径，见下方明细` };
+  if (forecast.readiness.comparison > 0 && completeStorage) return { level: "中", tone: "medium", note: `${number(summary.readiness.actionSkuCount - summary.readiness.decisionReady)} 个计费 SKU 缺少决策口径，见下方明细` };
   return { level: "低", tone: "low", note: "当前费用可看，但不宜直接执行推荐" };
 }
 
 function renderReadiness(summary, forecast) {
   const reportTypes = new Set(current.reports.map((report) => report.type));
-  const costCoverage = Math.min(summary.readiness.productCost, summary.readiness.fulfillmentFee, summary.readiness.firstMile);
+  const costCoverage = summary.readiness.threeCosts;
   const items = [
     ["库存基表", reportTypes.has("inventory") || summary.skuCount > 0, `${number(summary.skuCount)} 个 SKU`],
     ["详细库龄", summary.readiness.detailedAge > 0, `${number(summary.readiness.detailedAge)}/${number(summary.skuCount)}`],
     ["收费与体积", forecast.readiness.storage > 0, `${number(forecast.readiness.storage)}/${number(forecast.readiness.actionSkuCount)} 个计费 SKU`],
-    ["售价与佣金", summary.readiness.price > 0, `${number(summary.readiness.price)}/${number(summary.skuCount)}`],
+    ["售价与佣金", summary.readiness.saleTerms > 0, `${number(summary.readiness.saleTerms)}/${number(summary.skuCount)}`],
     ["三项成本", costCoverage > 0, `${number(costCoverage)}/${number(summary.skuCount)}`],
   ];
   document.querySelector("#readiness-grid").innerHTML = items.map(([label, ready, detail]) => `
@@ -583,10 +607,12 @@ function renderReadiness(summary, forecast) {
 
 function render() {
   const { summary, rule } = current;
-  const readinessForecast = selectedSummaryForecast();
   const forecast = buildDecisionForecast(selectedHorizon);
-  document.querySelector("#result-title").textContent = usingDemo ? "脱敏演示 · 库存概况" : "上传数据 · 库存概况";
-  document.querySelector("#result-context").textContent = `测算起始日 ${current.analysisDate} · ${rule.marketplace} · ${rule.currency}${summary.ageSnapshot ? ` · 库龄快照 ${dateLabel(summary.ageSnapshot)}` : ""}`;
+  document.querySelector("#result-title").textContent = usingDemo ? "脱敏演示 · 库存概况" : activeSource === "api" ? "API 数据 · 库存概况" : "上传数据 · 库存概况";
+  document.querySelector("#result-context").textContent = `测算起始日 ${current.analysisDate} · ${rule.marketplace} · ${rule.currency}${summary.ageSnapshot ? ` · 库龄快照 ${dateLabel(summary.ageSnapshot)}` : ""}${activeSource === "api" && apiManifest?.reportCreatedAt ? ` · API 报告生成 ${reportTimeLabel(apiManifest.reportCreatedAt)}` : ""}`;
+  document.querySelector("#footer-privacy").textContent = activeSource === "api"
+    ? "当前为本机授权 API 报告快照 · 不会自动创建清算或移除订单"
+    : "公开页面仅含脱敏演示数据；上传文件仅在浏览器处理 · 不会自动创建清算或移除订单";
   document.querySelector("#rule-version").textContent = `${rule.version} · 生效 ${rule.effectiveFrom}`;
   document.querySelector("#source-marketplace").textContent = `${rule.marketplace} · ${rule.currency}`;
   document.querySelector("#source-version").textContent = `${rule.version} · 生效 ${rule.effectiveFrom}`;
@@ -600,13 +626,16 @@ function render() {
 
   const reports = current.reports.filter((report) => report.type !== "unknown");
   document.querySelector("#report-strip").innerHTML = reports.map((report) => `<span><b>${escapeHtml(report.label)}</b>${number(report.rowCount)} 行<small>${escapeHtml(report.fileName)}</small></span>`).join("");
-  renderReadiness(summary, readinessForecast);
+  renderReadiness(summary, forecast);
 
   const missingPanel = document.querySelector("#missing-sku-panel");
-  const missingSkuDetails = summary.missingSkuDetails || [];
+  const allMissingSkuDetails = summary.missingSkuDetails || [];
+  const missingSkuDetails = summary.apiPlanningSkuCount
+    ? allMissingSkuDetails.filter((item) => current.rows.some((row) => row.sku === item.sku && row.actionUnits > 0))
+    : allMissingSkuDetails;
   missingPanel.hidden = missingSkuDetails.length === 0;
   missingPanel.innerHTML = missingSkuDetails.length ? `
-    <div><b>缺少口径的 SKU（${number(missingSkuDetails.length)} 个）</b><span>补全后重新分析，决策结果会自动更新</span></div>
+    <div><b>${summary.apiPlanningSkuCount ? "计费 SKU 缺少决策数据" : "缺少口径的 SKU"}（${number(missingSkuDetails.length)} 个）</b><span>补全后重新分析；${summary.apiPlanningSkuCount ? `另有 ${number(allMissingSkuDetails.length - missingSkuDetails.length)} 个非计费 SKU 缺项，可在下方明细查看` : "决策结果会自动更新"}</span></div>
     <ul>${missingSkuDetails.map((item) => `<li><b>${escapeHtml(item.sku)}</b><span>${escapeHtml(item.asin || item.product)}</span><small>缺少：${escapeHtml(item.fields.join("、"))}</small></li>`).join("")}</ul>
   ` : "";
 
@@ -615,7 +644,7 @@ function render() {
     metric("SKU 总数", number(summary.skuCount), `高风险 ${number(summary.riskCounts.high)} 个`),
     metric("可售库存", number(summary.available), "当前可售数量"),
     metric("调拨中库存", number(summary.transfer), "正在转入或转库"),
-    metric("长期仓储计费库存", number(summary.actionUnits), `${number(summary.readiness.actionSkuCount)} 个 SKU${snapshotDelta > 0 ? ` · 比当前可售多 ${number(snapshotDelta)} 件` : ""}`, "warning", "aged"),
+    metric(summary.apiPlanningSkuCount ? "预计附加费计费库存" : "长期仓储计费库存", number(summary.actionUnits), `${number(summary.readiness.actionSkuCount)} 个 SKU${summary.apiPlanningSkuCount ? ` · 普通库龄 181+ 为 ${number(summary.generalAged)} 件` : snapshotDelta > 0 ? ` · 比当前可售多 ${number(snapshotDelta)} 件` : ""}`, "warning", "aged"),
     metric("预计冗余库存", number(summary.excess), "仅作风险提示，不计入清算/移除", "neutral", "excess"),
     metric("高风险 SKU", number(summary.riskCounts.high), `中风险 ${number(summary.riskCounts.medium)} · 低风险 ${number(summary.riskCounts.low)}`, "danger", "high"),
   ].join("");
@@ -624,10 +653,11 @@ function render() {
   const fullBookPnl = summary.readiness.actionSkuCount > 0 && summary.readiness.bookPnl === summary.readiness.actionSkuCount;
   const removalTotalLoss = summary.actionUnits <= 0 ? "无计费库存" : fullRemovalLoss ? money(summary.removalTotalLoss) : `待补 ${number(summary.readiness.actionSkuCount - summary.readiness.removalLoss)} 个 SKU`;
   const liquidationNetAfterCosts = summary.actionUnits <= 0 ? "无计费库存" : fullBookPnl ? money(summary.liquidationNetAfterCosts) : `待补 ${number(summary.readiness.actionSkuCount - summary.readiness.bookPnl)} 个 SKU`;
-  const currentStorageTotal = summary.storage + summary.agedFee;
+  const currentStorageReady = summary.readiness.storageEstimate === summary.skuCount && summary.readiness.agedFee === summary.skuCount;
+  const currentStorageTotal = currentStorageReady ? money(summary.storage + summary.agedFee) : "待补部分 SKU";
   const removalLossAbsolute = fullRemovalLoss ? money(Math.abs(summary.removalTotalLoss)) : "待补数据";
   document.querySelector("#fee-summary-grid").innerHTML = `
-    <article class="cost-path-card storage-path"><div class="cost-path-head"><span>账一</span><b>本月继续存</b></div><p>本月仓储费合计</p><h3>${money(currentStorageTotal)}</h3><div class="cost-equation"><span>基础仓储费<b>${money(summary.storage)}</b></span><i>＋</i><span>长期仓储附加费<b>${money(summary.agedFee)}</b></span><i>＝</i><strong>${money(currentStorageTotal)}</strong></div><small>基础仓储费按全部 ${number(summary.available)} 件可售库存；长期附加费按计费库龄库存。</small></article>
+    <article class="cost-path-card storage-path"><div class="cost-path-head"><span>账一</span><b>本月继续存</b></div><p>${summary.apiPlanningSkuCount ? "按 API 报告估算的仓储费" : "本月仓储费合计"}</p><h3>${currentStorageTotal}</h3><div class="cost-equation"><span>基础仓储费<b>${number(summary.readiness.storageEstimate)}/${number(summary.skuCount)} SKU 已覆盖 · ${money(summary.storage)}</b></span><i>＋</i><span>${summary.apiPlanningSkuCount ? "Amazon 预计长期附加费" : "长期仓储附加费"}<b>${number(summary.readiness.agedFee)}/${number(summary.skuCount)} SKU 已覆盖 · ${money(summary.agedFee)}</b></span><i>＝</i><strong>${currentStorageTotal}</strong></div><small>${summary.apiPlanningSkuCount ? "基础仓储费来自最近收费报告或体积估算；附加费是 Amazon 预计值，均非本月实际账单。" : "基础仓储费按可售库存；长期附加费按计费库龄库存。"}${currentStorageReady ? "" : " 未覆盖 SKU 未计入已覆盖金额，不能把该金额当作全店合计。"}</small></article>
     <article class="cost-path-card liquidation-path"><div class="cost-path-head"><span>账二</span><b>现在清算</b></div><p>扣除费用与成本后的净回收</p><h3>${liquidationNetAfterCosts}</h3><dl class="liquidation-breakdown"><div><dt>清算毛回收</dt><dd>${money(summary.liquidationGross)}</dd></div><div><dt>－ Amazon 清算费用</dt><dd>${money(summary.liquidationFee)}</dd></div><div><dt>＝ 清算现金回收</dt><dd>${money(summary.liquidationNet)}</dd></div><div><dt>－ 采购成本</dt><dd>${fullBookPnl ? money(summary.knownProductCost) : "待补"}</dd></div><div><dt>－ 头程</dt><dd>${fullBookPnl ? money(summary.knownFirstMileCost) : "待补"}</dd></div><div class="breakdown-total"><dt>＝ 清算净回收</dt><dd>${liquidationNetAfterCosts}</dd></div></dl><small>Amazon 清算费用包括转介费 ${money(summary.liquidationReferral)} 和处理费 ${money(summary.liquidationProcessing)}；采购成本和头程仅针对长期计费库存扣除。</small></article>
     <article class="cost-path-card removal-path"><div class="cost-path-head"><span>账三</span><b>现在移除</b></div><p>预计移除总损失</p><h3>${removalTotalLoss}</h3><div class="cost-equation"><span>采购成本<b>${fullRemovalLoss ? money(summary.knownProductCost) : "待补"}</b></span><i>＋</i><span>头程<b>${fullRemovalLoss ? money(summary.knownFirstMileCost) : "待补"}</b></span><i>＋</i><span>Amazon移除费<b>${money(summary.removalFee)}</b></span><i>＝</i><strong>${removalLossAbsolute}</strong></div><small>总损失用负数表示；因缺少移除后回收价值，不参与最终推荐。</small></article>
   `;
@@ -707,10 +737,10 @@ function render() {
   `).join("");
 
   document.querySelector("#forecast-coverage").textContent = `费用覆盖 ${number(forecast.readiness.storage)}/${number(forecast.readiness.actionSkuCount)} 个计费 SKU`;
-  document.querySelector("#forecast-summary").innerHTML = `选择继续放 <b>${selectedHorizon} 天</b>：从现在到该阶段，预计累计再付 <strong>${money(forecast.totalHoldingCost)}</strong>。这是累计金额，不是单月费用。`;
+  document.querySelector("#forecast-summary").innerHTML = `选择继续放 <b>${selectedHorizon} 天</b>：从现在到该阶段，预计累计再付 <strong>${forecast.readiness.storage === forecast.readiness.actionSkuCount ? money(forecast.totalHoldingCost) : "待补计费 SKU 的费用数据"}</strong>。这是累计金额，不是单月费用。`;
   const decisionForecasts = FORECAST_HORIZONS.map((horizonDays) => buildDecisionForecast(horizonDays));
   document.querySelector("#forecast-chart").innerHTML = decisionForecasts.map((item) => {
-    return `<button type="button" class="forecast-stage-card ${item.horizonDays === selectedHorizon ? "active" : ""}" data-horizon="${item.horizonDays}" aria-pressed="${item.horizonDays === selectedHorizon}"><div><span>继续放置</span><b>${item.horizonDays} 天</b></div><p>累计新增仓储费</p><h4>${money(item.totalHoldingCost)}</h4><dl><div><dt>其中基础仓储费</dt><dd>${money(item.baseStorageCost)}</dd></div><div><dt>其中长期附加费</dt><dd>${money(item.agedSurchargeCost)}</dd></div><div><dt>预计到期仍剩</dt><dd>${number(item.remainingUnits)} 件</dd></div></dl></button>`;
+    return `<button type="button" class="forecast-stage-card ${item.horizonDays === selectedHorizon ? "active" : ""}" data-horizon="${item.horizonDays}" aria-pressed="${item.horizonDays === selectedHorizon}"><div><span>继续放置</span><b>${item.horizonDays} 天</b></div><p>累计新增仓储费</p><h4>${item.readiness.storage === item.readiness.actionSkuCount ? money(item.totalHoldingCost) : "待补数据"}</h4><dl><div><dt>其中基础仓储费</dt><dd>${money(item.baseStorageCost)}</dd></div><div><dt>其中长期附加费</dt><dd>${money(item.agedSurchargeCost)}</dd></div><div><dt>预计到期仍剩</dt><dd>${number(item.remainingUnits)} 件</dd></div></dl></button>`;
   }).join("");
   const forecast90 = decisionForecasts.find((item) => item.horizonDays === 90);
   const forecast180 = decisionForecasts.find((item) => item.horizonDays === 180);
@@ -718,21 +748,40 @@ function render() {
   document.querySelector("#forecast-driver").innerHTML = `<b>为什么长期费用会上升：</b>从90天延长到180天预计再增加 ${money(addedAfter90)}。库存会进入更高库龄费率区间，跨入10–12月时基础仓储费也可能上升。`;
 
   const ageBuckets = summary.ageBuckets || [];
-  document.querySelector("#age-coverage").textContent = summary.readiness.detailedAge ? `明细覆盖 ${number(summary.readiness.detailedAge)}/${number(summary.skuCount)} 个 SKU${summary.ageSnapshot ? ` · 快照 ${dateLabel(summary.ageSnapshot)}` : ""}` : "未识别详细库龄报告";
+  document.querySelector(".age-panel-head h2").textContent = summary.apiPlanningSkuCount ? "普通库龄与预计计费区间" : "各库龄区间库存";
+  document.querySelector("#age-coverage").textContent = summary.readiness.detailedAge ? `${summary.apiPlanningSkuCount ? "Amazon 预计计费区间" : "明细"}覆盖 ${number(summary.readiness.detailedAge)}/${number(summary.skuCount)} 个 SKU${summary.ageSnapshot ? ` · 快照 ${dateLabel(summary.ageSnapshot)}` : ""}` : "未识别详细库龄报告";
+  document.querySelector(".age-note").textContent = summary.apiPlanningSkuCount
+    ? "0–180 天是普通库龄件数；181 天以上显示 Amazon 预计附加费计费件数，不等于全部普通库龄库存。处置测算仅按预计计费件数。"
+    : "库存件数来自最新库龄快照。橙色区间表示当前站点已进入长期仓储计费范围。";
   document.querySelector("#age-bucket-grid").innerHTML = summary.readiness.detailedAge ? ageBuckets.map((bucket) => `<article class="age-bucket ${bucket.charged ? "charged" : "not-charged"} ${bucket.units === 0 ? "zero" : ""}"><div><b>${escapeHtml(bucket.bucket)} 天</b><span>${bucket.charged ? "计费" : "未计费"}</span></div><strong>${number(bucket.units)}<small> 件</small></strong><p>${number(bucket.skuCount)} 个 SKU</p></article>`).join("") : `<div class="age-empty">上传详细库龄报告后显示每个收费区间的库存件数。</div>`;
 
   const inventoryRows = inventoryRowsForView();
-  document.querySelector("#inventory-table-body").innerHTML = inventoryRows.map((row) => {
-    const ageCells = DETAILED_AGE_BUCKETS.map((bucket) => `<td>${row.ageMode === "detailed" ? number(row.age?.[bucket]) : "—"}</td>`).join("");
+  const ageColumnKeys = summary.ageBuckets.map((bucket) => bucket.bucket);
+  const inventoryPageCount = Math.max(1, Math.ceil(inventoryRows.length / PAGE_SIZE));
+  inventoryPage = Math.min(inventoryPage, inventoryPageCount);
+  const visibleInventoryRows = inventoryRows.slice((inventoryPage - 1) * PAGE_SIZE, inventoryPage * PAGE_SIZE);
+  document.querySelector("#inventory-table-body").innerHTML = visibleInventoryRows.map((row) => {
+    const ageCells = ageColumnKeys.map((bucket) => `<td>${row.ageMode === "detailed" || row.ageMode === "api-billable" ? number(row.age?.[bucket]) : "—"}</td>`).join("");
     const missing = row.missingFields.length ? `<em class="data-gap">缺：${escapeHtml(row.missingFields.join("、"))}</em>` : "";
     return `<tr class="${row.actionUnits > 0 ? "aged-row" : ""}"><td><b>${escapeHtml(row.sku)}</b><span>${escapeHtml(row.asin)}</span><small>${escapeHtml(row.product)}</small>${missing}</td><td>${number(row.available)}</td><td>${number(row.transfer)}</td><td>${row.salesInputReady ? number(row.sales30) : "待补"}</td><td>${number(row.excess)}</td><td><b>${number(row.actionUnits)}</b></td>${ageCells}</tr>`;
   }).join("");
   const inventoryFilterLabels = { all: "全部 SKU", aged: "长期仓储计费 SKU", excess: "预计冗余 SKU", high: "高风险 SKU" };
-  document.querySelector("#inventory-table-count").textContent = `当前筛选：${inventoryFilterLabels[inventoryMetricFilter]} · 显示 ${number(inventoryRows.length)}/${number(summary.skuCount)} 个 SKU`;
+  document.querySelector("#inventory-table-count").textContent = `当前筛选：${inventoryFilterLabels[inventoryMetricFilter]} · ${inventoryRows.length ? `显示 ${number((inventoryPage - 1) * PAGE_SIZE + 1)}–${number((inventoryPage - 1) * PAGE_SIZE + visibleInventoryRows.length)}` : "无匹配"} / ${number(inventoryRows.length)} 个 SKU · 下载包含当前筛选全部数据`;
+  renderPagination("#inventory-pagination", inventoryPage, inventoryPageCount, "inventory");
+  document.querySelector(".inventory-table thead tr").innerHTML = `
+    <th>SKU / 商品</th><th>可售</th><th>调拨中</th><th>30日销量</th><th>预计冗余</th><th>${summary.apiPlanningSkuCount ? "预计计费" : "长期计费"}</th>
+    ${ageColumnKeys.map((bucket) => `<th>${escapeHtml(bucket)}天</th>`).join("")}
+  `;
+  document.querySelector(".inventory-detail-note").textContent = summary.apiPlanningSkuCount
+    ? "0–180 天为普通库龄；181 天以上各列为 Amazon 预计附加费计费件数。实际计费与最终处置资格应在 Seller Central 核对。"
+    : "“—”表示该 SKU 未识别到详细库龄区间；长期计费库存仍按当前站点规则计算。";
   document.querySelector("#inventory-filter-clear").hidden = inventoryMetricFilter === "all";
 
   const rows = filteredRows();
-  document.querySelector("#table-body").innerHTML = rows.map((row) => {
+  const decisionPageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  decisionPage = Math.min(decisionPage, decisionPageCount);
+  const visibleDecisionRows = rows.slice((decisionPage - 1) * PAGE_SIZE, decisionPage * PAGE_SIZE);
+  document.querySelector("#table-body").innerHTML = visibleDecisionRows.map((row) => {
     const itemForecast = rowForecast(row);
     const clearanceForecast = rowClearanceForecast(row);
     const decision = rowDecision(row);
@@ -741,7 +790,8 @@ function render() {
     const actionText = actionKey === "excluded" ? "已排除决策" : actionLabel(actionKey);
     return `<tr><td><b>${escapeHtml(row.sku)}</b><span>${escapeHtml(row.asin)}</span><small>${escapeHtml(row.product)}</small></td><td>${riskBadge(row.risk)}</td><td>${number(row.available)}</td><td>${row.salesInputReady ? number(row.sales30) : "待补"}</td><td>${number(row.actionUnits)}</td><td>${number(itemForecast.remainingUnits)}</td><td>${moneyOrPending(itemForecast.totalHoldingCost)}</td><td>${breakEven}</td><td>${moneyOrPending(clearanceForecast.clearanceNetAfterCosts)}</td><td>${moneyOrPending(clearanceForecast.maxAdvertisingCostPerUnit)}</td><td>${moneyOrPending(row.liquidationNetAfterCosts)}</td><td>${moneyOrPending(row.removalTotalLoss)}</td><td><b class="action action-${actionKey}">${escapeHtml(actionText)}</b></td></tr>`;
   }).join("");
-  document.querySelector("#table-count").textContent = `显示 ${number(rows.length)}/${number(summary.skuCount)} 个 SKU · ${selectedHorizon} 天 · ${activeSalesLabel} · CSV 含正常销售与广告清货的四个预测周期。`;
+  document.querySelector("#table-count").textContent = `显示 ${number(visibleDecisionRows.length)} / 筛选后 ${number(rows.length)} 个 SKU · ${selectedHorizon} 天 · ${activeSalesLabel} · 下载包含当前筛选全部 SKU 和四个预测周期。`;
+  renderPagination("#decision-pagination", decisionPage, decisionPageCount, "decision");
 
   const warnings = current.warnings.length ? current.warnings : ["当前报告组合已覆盖主要字段；执行前仍应复核 Seller Central 费率预览。"];
   document.querySelector("#warning-list").innerHTML = warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("");
@@ -763,7 +813,10 @@ async function analyzeSelectedFiles({ scrollToResults = true } = {}) {
     current = analyzeSources(parsedSources, marketplace.value, analysisOptions());
     excludedDecisionSkus.clear();
     inventoryMetricFilter = "all";
+    inventoryPage = 1;
+    decisionPage = 1;
     usingDemo = false;
+    activeSource = "upload";
     setStatus(`分析完成：识别 ${recognized.length} 个有效工作表。文件未离开当前浏览器。`, "success");
     render();
     if (scrollToResults) requestAnimationFrame(() => document.querySelector("#inventory-overview").scrollIntoView({ behavior: "smooth", block: "start" }));
@@ -771,6 +824,79 @@ async function analyzeSelectedFiles({ scrollToResults = true } = {}) {
     setStatus(error instanceof Error ? error.message : "文件解析失败，请检查报告格式。", "error");
   } finally {
     analyzeButton.disabled = selectedFiles.length === 0;
+  }
+}
+
+function renderPagination(selector, page, totalPages, table) {
+  document.querySelector(selector).innerHTML = totalPages <= 1 ? "" : `
+    <button type="button" data-table="${table}" data-page="${page - 1}" ${page === 1 ? "disabled" : ""}>上一页</button>
+    <span>第 ${number(page)} / ${number(totalPages)} 页</span>
+    <button type="button" data-table="${table}" data-page="${page + 1}" ${page === totalPages ? "disabled" : ""}>下一页</button>
+  `;
+}
+
+function showInputRoute(route) {
+  const isApi = route === "api";
+  document.querySelector("#manual-input-panel").hidden = isApi;
+  document.querySelector("#api-input-panel").hidden = !isApi;
+  document.querySelectorAll("[data-source-route]").forEach((button) => {
+    const selected = button.dataset.sourceRoute === route;
+    button.classList.toggle("active", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  });
+  marketplace.disabled = isApi && Boolean(apiManifest);
+  if (isApi && apiManifest) marketplace.value = apiManifest.marketplace;
+}
+
+async function discoverApi() {
+  const status = document.querySelector("#api-source-status");
+  try {
+    const response = await fetch("./api/manifest", { cache: "no-store" });
+    if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) throw new Error("local bridge unavailable");
+    const manifest = await response.json();
+    if (!["US", "CA", "UK", "DE"].includes(manifest.marketplace) || !manifest.reports?.some((report) => report.kind === "planning")) throw new Error("invalid report manifest");
+    apiManifest = manifest;
+    status.textContent = `${manifest.displayName || manifest.marketplace} · ${manifest.marketplace} · ${manifest.reports.length} 份已授权 API 报告${manifest.reportCreatedAt ? ` · 库存报告生成于 ${reportTimeLabel(manifest.reportCreatedAt)}` : ""}。点击后读取本机快照并测算；若需更新数据，请先重新拉取 API 报告。`;
+    document.querySelector("#api-analyze-button").disabled = false;
+    if (!document.querySelector("#api-input-panel").hidden) marketplace.value = manifest.marketplace;
+  } catch {
+    apiManifest = null;
+    status.textContent = "当前是公开网页或本机连接未启动。请打开本机授权版使用 API；也可切回“上传文件”继续分析。";
+    document.querySelector("#api-analyze-button").disabled = true;
+  }
+}
+
+async function analyzeApi() {
+  if (!apiManifest) return;
+  const button = document.querySelector("#api-analyze-button");
+  button.disabled = true;
+  setStatus("正在读取本机授权报告并计算处置方案…");
+  try {
+    const XLSX = await getXlsx();
+    const reports = await Promise.all(apiManifest.reports.map(async (report) => {
+      const response = await fetch(report.url, { cache: "no-store" });
+      if (!response.ok) throw new Error(`无法读取 ${report.kind} 报告。`);
+      const workbook = XLSX.read(await response.arrayBuffer(), { type: "array", cellDates: true });
+      return workbookToSources(workbook, report.fileName, XLSX, apiManifest.marketplace);
+    }));
+    const recognized = reports.flat().filter((source) => source.type !== "unknown" && source.rows.length);
+    if (!recognized.some((source) => source.type === "planning")) throw new Error("API 库存规划报告未识别到预计计费数量列，不能用普通库龄数量替代。");
+    parsedSources = recognized;
+    marketplace.value = apiManifest.marketplace;
+    current = analyzeSources(parsedSources, apiManifest.marketplace, analysisOptions());
+    excludedDecisionSkus.clear();
+    inventoryMetricFilter = "all";
+    inventoryPage = 1;
+    decisionPage = 1;
+    usingDemo = false;
+    activeSource = "api";
+    setStatus(`API 分析完成：识别 ${recognized.length} 份报告。缺少的成本或费用会按 SKU 标记待补，不会自动填 0。`, "success");
+    render();
+    requestAnimationFrame(() => document.querySelector("#inventory-overview").scrollIntoView({ behavior: "smooth", block: "start" }));
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : "API 分析失败，请核对授权报告。", "error");
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -805,25 +931,41 @@ document.querySelector("#template-button").addEventListener("click", () => {
   const link = document.createElement("a"); link.href = url; link.download = "fba-cost-input-template.csv"; link.click(); URL.revokeObjectURL(url);
 });
 document.querySelector("#demo-button").addEventListener("click", () => {
-  selectedFiles = []; parsedSources = []; fileInput.value = ""; usingDemo = true;
-  excludedDecisionSkus.clear(); inventoryMetricFilter = "all";
+  selectedFiles = []; parsedSources = []; fileInput.value = ""; usingDemo = true; activeSource = "demo";
+  excludedDecisionSkus.clear(); inventoryMetricFilter = "all"; inventoryPage = 1; decisionPage = 1;
   current = createDemoAnalysis(marketplace.value, analysisOptions()); updateSelectedFiles(); setStatus("已恢复公开脱敏演示数据。", "success"); render();
   requestAnimationFrame(() => document.querySelector("#inventory-overview").scrollIntoView({ behavior: "smooth", block: "start" }));
 });
-marketplace.addEventListener("change", () => { if (!usingDemo && selectedFiles.length) analyzeSelectedFiles({ scrollToResults: false }); else recalculate(); });
+marketplace.addEventListener("change", () => {
+  if (activeSource === "api") {
+    usingDemo = true;
+    activeSource = "demo";
+    parsedSources = [];
+    setStatus("已切换站点；请上传对应站点报告，或切回 API 模式读取授权店铺。", "info");
+    recalculate();
+  } else if (!usingDemo && selectedFiles.length) analyzeSelectedFiles({ scrollToResults: false });
+  else recalculate();
+});
+document.querySelector(".source-route").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-source-route]");
+  if (button) showInputRoute(button.dataset.sourceRoute);
+});
+document.querySelector("#api-analyze-button").addEventListener("click", analyzeApi);
+discoverApi();
 analysisDateInput.addEventListener("change", recalculate);
 for (const input of [productCostRateInput, fulfillmentFeeRateInput, firstMileRateInput, clearancePriceRateInput, advertisingCostRateInput, clearanceSalesRateInput]) input.addEventListener("change", recalculate);
 document.querySelector("#forecast-chart").addEventListener("click", (event) => { const button = event.target.closest("button[data-horizon]"); if (!button) return; selectedHorizon = Number(button.dataset.horizon); render(); });
 document.querySelector("#sensitivity-grid").addEventListener("click", (event) => { const button = event.target.closest("button[data-sales-scenario]"); if (!button) return; selectedSalesScenario = button.dataset.salesScenario; render(); });
-document.querySelector("#inventory-search-input").addEventListener("input", (event) => { inventoryQuery = event.target.value.trim(); render(); });
+document.querySelector("#inventory-search-input").addEventListener("input", (event) => { inventoryQuery = event.target.value.trim(); inventoryPage = 1; render(); });
 document.querySelector("#summary-grid").addEventListener("click", (event) => {
   const button = event.target.closest("button[data-inventory-filter]");
   if (!button) return;
   inventoryMetricFilter = inventoryMetricFilter === button.dataset.inventoryFilter ? "all" : button.dataset.inventoryFilter;
+  inventoryPage = 1;
   render();
   requestAnimationFrame(() => document.querySelector(".inventory-detail-panel").scrollIntoView({ behavior: "smooth", block: "start" }));
 });
-document.querySelector("#inventory-filter-clear").addEventListener("click", () => { inventoryMetricFilter = "all"; render(); });
+document.querySelector("#inventory-filter-clear").addEventListener("click", () => { inventoryMetricFilter = "all"; inventoryPage = 1; render(); });
 document.querySelector("#inventory-export-button").addEventListener("click", () => {
   downloadRows(inventoryRowsForView(), `fba-inventory-${inventoryMetricFilter}-${current.marketplace.toLowerCase()}.csv`);
 });
@@ -843,10 +985,20 @@ document.querySelector("#decision-filter-panel").addEventListener("click", (even
   }
   render();
 });
-document.querySelector("#search-input").addEventListener("input", (event) => { query = event.target.value.trim(); render(); });
-document.querySelector("#risk-filter").addEventListener("change", (event) => { riskFilter = event.target.value; render(); });
-document.querySelector("#action-filter").addEventListener("change", (event) => { actionFilter = event.target.value; render(); });
-document.querySelector("#sort-mode").addEventListener("change", (event) => { sortMode = event.target.value; render(); });
+document.querySelector("#search-input").addEventListener("input", (event) => { query = event.target.value.trim(); decisionPage = 1; render(); });
+document.querySelector("#risk-filter").addEventListener("change", (event) => { riskFilter = event.target.value; decisionPage = 1; render(); });
+document.querySelector("#action-filter").addEventListener("change", (event) => { actionFilter = event.target.value; decisionPage = 1; render(); });
+document.querySelector("#sort-mode").addEventListener("change", (event) => { sortMode = event.target.value; decisionPage = 1; render(); });
+for (const selector of ["#inventory-pagination", "#decision-pagination"]) {
+  document.querySelector(selector).addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-page]");
+    if (!button || button.disabled) return;
+    if (button.dataset.table === "inventory") inventoryPage = Number(button.dataset.page);
+    else decisionPage = Number(button.dataset.page);
+    render();
+    requestAnimationFrame(() => document.querySelector(button.dataset.table === "inventory" ? ".inventory-detail-panel" : "#sku-list").scrollIntoView({ behavior: "smooth", block: "start" }));
+  });
+}
 document.querySelector("#export-button").addEventListener("click", () => {
   downloadRows(current.rows, `fba-inventory-analysis-${current.marketplace.toLowerCase()}.csv`);
 });

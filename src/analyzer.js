@@ -2,6 +2,7 @@ import { LIQUIDATION, MARKET_RULES, feeFromTier } from "./rules.js";
 
 const REPORT_LABELS = {
   inventory: "库存报告",
+  planning: "API 库存规划报告",
   age: "库龄报告",
   charge: "仓储收费报告",
   commission: "佣金预览报告",
@@ -18,6 +19,7 @@ const recognizedHeaders = new Set([
   "unit-cost", "product-cost", "unit-cost-rate", "product-cost-rate",
   "fulfillment-fee-per-unit", "fulfillment-fee-rate", "first-mile-cost-rate",
   "clearance-price-rate", "advertising-cost-rate", "advertising-cost-per-unit", "clearance-sales-30",
+  "quantity-to-be-charged-ais-181-210-days", "estimated-ais-181-210-days",
 ]);
 
 export const DETAILED_AGE_BUCKETS = [
@@ -102,7 +104,8 @@ function matrixToRows(matrix) {
 export function detectReportType(headers) {
   const set = new Set(headers.map(normalizeHeader));
   if (set.has("estimated-monthly-storage-fee") && set.has("fnsku")) return "charge";
-  if (set.has("estimated-referral-fee-per-item") && set.has("seller-sku")) return "commission";
+  if (set.has("quantity-to-be-charged-ais-181-210-days") && set.has("sku")) return "planning";
+  if ((set.has("estimated-referral-fee-per-item") || set.has("estimated-referral-fee-per-unit")) && (set.has("seller-sku") || set.has("sku"))) return "commission";
   if (set.has("merchant-sku") && (set.has("181-210") || set.has("0-180"))) return "age";
   if (set.has("available") && (set.has("sku") || set.has("seller-sku"))) return "inventory";
   if (set.has("item-name") && set.has("seller-sku") && (set.has("asin1") || set.has("product-id"))) return "products";
@@ -142,6 +145,61 @@ function normalizedVolume(volume, unit, targetUnit) {
 }
 
 function rowToSource(type, row, rule) {
+  if (type === "planning") {
+    const currency = text(first(row, ["currency"])).toUpperCase();
+    if (currency && currency !== rule.currency) throw new Error(`API 库存规划报告币种 ${currency} 与 ${rule.marketplace} 站点不一致。`);
+    const marketplaceValue = text(first(row, ["marketplace"])).toUpperCase();
+    const aliases = {
+      US: ["US", "AMAZON.COM", "ATVPDKIKX0DER"],
+      CA: ["CA", "AMAZON.CA", "A2EUQ1WTGCTBG2"],
+      UK: ["UK", "GB", "AMAZON.CO.UK", "A1F83G8C2ARO7P"],
+      DE: ["DE", "AMAZON.DE", "A1PA6795UKMFR9"],
+    };
+    if (marketplaceValue && !aliases[rule.marketplace].includes(marketplaceValue)) {
+      throw new Error(`API 库存规划报告站点 ${marketplaceValue} 与选择的 ${rule.marketplace} 不一致。`);
+    }
+    const bands = rule.marketplace === "CA"
+      ? ["181-210", "211-240", "241-270", "271-300", "301-330", "331-365", "365+"]
+      : ["181-210", "211-240", "241-270", "271-300", "301-330", "331-365", "366-455", "456+"];
+    const suffix = (band) => band.endsWith("+") ? `${band.slice(0, -1)}-plus` : band;
+    const age = {};
+    let aisFee = 0;
+    let aisFeeComplete = true;
+    for (const band of bands) {
+      const field = `quantity-to-be-charged-ais-${suffix(band)}-days`;
+      const rawQuantity = first(row, [field]);
+      const parsedQuantity = numberOrNull(rawQuantity);
+      if (rawQuantity !== "" && (parsedQuantity === null || parsedQuantity < 0 || !Number.isInteger(parsedQuantity))) {
+        throw new Error(`API 库存规划报告 ${field} 必须是非负整数。`);
+      }
+      const quantity = parsedQuantity ?? 0;
+      age[band] = quantity;
+      const fee = numberOrNull(first(row, [`estimated-ais-${suffix(band)}-days`]));
+      if (fee !== null && fee < 0) throw new Error(`API 库存规划报告 ${band} 预计附加费不能为负数。`);
+      if (quantity > 0 && fee === null) aisFeeComplete = false;
+      if (fee !== null) aisFee += fee;
+    }
+    const generalAged = ["inv-age-181-to-270-days", "inv-age-271-to-365-days", "inv-age-365-plus-days", "inv-age-366-to-455-days", "inv-age-456-plus-days"]
+      .reduce((total, field) => total + valueOrZero(first(row, [field])), 0);
+    age["0-180"] = valueOrZero(first(row, ["inv-age-0-to-90-days"])) + valueOrZero(first(row, ["inv-age-91-to-180-days"]));
+    return {
+      sku: text(first(row, ["sku"])),
+      fnsku: text(first(row, ["fnsku"])),
+      asin: text(first(row, ["asin"])),
+      product: text(first(row, ["product-name"])),
+      available: numberOrNull(first(row, ["available"])),
+      transfer: valueOrZero(first(row, ["fc-transfer"])),
+      sales30: numberOrNull(first(row, ["units-shipped-t30"])),
+      excess: numberOrNull(first(row, ["estimated-excess-quantity"])),
+      price: firstPositive(row, ["your-price", "sales-price"]),
+      volume: normalizedVolume(first(row, ["item-volume"]), first(row, ["volume-unit-measurement"]), rule.volumeUnit),
+      ageMode: "api-billable",
+      ageSnapshot: first(row, ["Inventory age snapshot date", "snapshot-date"]),
+      generalAged,
+      aisFee: aisFeeComplete ? aisFee : null,
+      age,
+    };
+  }
   if (type === "inventory") {
     return {
       sku: text(first(row, ["sku", "seller-sku", "merchant-sku"])),
@@ -213,9 +271,11 @@ function rowToSource(type, row, rule) {
       asin: text(first(row, ["asin", "asin1"])),
       product: text(first(row, ["item-name", "product-name"])),
       price: numberOrNull(first(row, ["price", "your-price"])),
-      referralFee: numberOrNull(first(row, ["estimated-referral-fee-per-item"])),
-      fulfillmentFee: numberOrNull(first(row, ["fulfillment-fee-per-unit", "fba-fulfillment-fee-per-unit", "estimated-fulfillment-fee-per-item", "estimated-fulfillment-fee-per-unit"])),
+      referralFee: numberOrNull(first(row, ["estimated-referral-fee-per-item", "estimated-referral-fee-per-unit"])),
+      fulfillmentFee: numberOrNull(first(row, ["fulfillment-fee-per-unit", "fba-fulfillment-fee-per-unit", "estimated-fulfillment-fee-per-item", "estimated-fulfillment-fee-per-unit", "expected-fulfillment-fee-per-unit"])),
       fulfillmentFeeRate: rateOrNull(first(row, ["fulfillment-fee-rate", "fba-fulfillment-fee-rate", "fba配送费比例"])),
+      weight: normalizedWeight(first(row, ["item-package-weight"]), first(row, ["unit-of-weight"]), rule.weightUnit),
+      sizeTier: normalizeSizeTier(first(row, ["product-size-tier"])),
     };
   }
   if (type === "products") {
@@ -279,9 +339,9 @@ function sumAge(age) {
 
 function agedUnits(item, rule) {
   const age = item.age || {};
-  if (item.ageMode === "detailed") {
+  if (item.ageMode === "detailed" || item.ageMode === "api-billable") {
     const keys = rule.ageStart === 181
-      ? ["181-210", "211-240", "241-270", "271-300", "301-330", "331-365", "366-455", "456+"]
+      ? ["181-210", "211-240", "241-270", "271-300", "301-330", "331-365", "365+", "366-455", "456+"]
       : ["241-270", "271-300", "301-330", "331-365", "366-455", "456+"];
     return keys.reduce((sum, key) => sum + valueOrZero(age[key]), 0);
   }
@@ -294,6 +354,7 @@ function ageFee(item, rule) {
   let total = 0;
   for (const [bucket, volumeRate, unitRate, method] of rule.aged) {
     let units = valueOrZero(item.age[bucket]);
+    if (bucket === "366+" && item.ageMode === "detailed") units = valueOrZero(item.age["366-455"]) + valueOrZero(item.age["456+"]);
     if (!units && item.ageMode !== "detailed") {
       if (bucket === "181-210" && rule.ageStart === 181) units = valueOrZero(item.age["181-270"]);
       if (bucket === "271-300") units = valueOrZero(item.age["271-365"]);
@@ -336,8 +397,11 @@ function agedFeePerUnitAtAge(item, rule, ageDays) {
 }
 
 function actionCohorts(item, rule) {
-  if (item.ageMode !== "detailed") return [];
-  return DETAILED_AGE_BUCKETS
+  if (item.ageMode !== "detailed" && item.ageMode !== "api-billable") return [];
+  const buckets = item.ageMode === "api-billable" && rule.marketplace === "CA"
+    ? [...DETAILED_AGE_BUCKETS.slice(0, 7), "365+"]
+    : DETAILED_AGE_BUCKETS;
+  return buckets
     .map((bucket) => ({ bucket, ageDays: bucketStart(bucket), units: valueOrZero(item.age?.[bucket]) }))
     .filter((cohort) => cohort.ageDays >= rule.ageStart && cohort.units > 0)
     .sort((a, b) => b.ageDays - a.ageDays);
@@ -574,9 +638,16 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
   if (analysisDate < rule.effectiveFrom) {
     throw new Error(`${marketplace} 费率从 ${rule.effectiveFrom} 起生效，不能用于 ${analysisDate} 的测算。`);
   }
-  const byType = { inventory: [], age: [], charge: [], commission: [], products: [], costs: [] };
+  const byType = { inventory: [], planning: [], age: [], charge: [], commission: [], products: [], costs: [] };
   for (const source of parsedSources) {
     if (byType[source.type]) byType[source.type].push(...source.rows);
+  }
+  if (byType.planning.length) {
+    const skus = new Set();
+    for (const row of byType.planning) {
+      if (skus.has(row.sku)) throw new Error(`API 库存规划报告中 SKU ${row.sku} 重复，请只保留同一快照的一条记录。`);
+      skus.add(row.sku);
+    }
   }
 
   const items = new Map();
@@ -588,6 +659,7 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
   };
 
   for (const row of byType.inventory) mergeDefined(ensure(row), row);
+  for (const row of byType.planning) mergeDefined(ensure(row), row);
   if (!items.size) for (const row of byType.age) mergeDefined(ensure(row), row);
 
   const skuIndex = () => new Map([...items.values()].filter((item) => item.sku).map((item) => [item.sku, item]));
@@ -706,7 +778,7 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
     normalized.aged = agedUnits(normalized, rule);
     normalized.actionUnits = normalized.aged;
     normalized.storageEstimate = monthlyStorage(normalized, rule, month);
-    normalized.agedFee = ageFee(normalized, rule);
+    normalized.agedFee = normalized.ageMode === "api-billable" ? normalized.aisFee : ageFee(normalized, rule);
     normalized.removalFeeUnit = feeFromTier(rule.removal[normalized.sizeTier], normalized.weight, rule.incrementRounding);
     normalized.processingFeeUnit = feeFromTier(rule.processing[normalized.sizeTier], normalized.weight, rule.incrementRounding);
     normalized.liquidationGross = normalized.price * normalized.actionUnits * LIQUIDATION.grossRecoveryRate;
@@ -767,8 +839,12 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
   const countReady = (field) => analyzed.filter((row) => Number.isFinite(row[field])).length;
   const actionRows = analyzed.filter((row) => row.actionUnits > 0);
   const decisionBreakEvenDays = portfolioBreakEvenDays(analyzed, rule, month);
-  const detailedAgeRows = analyzed.filter((row) => row.ageMode === "detailed");
-  const ageBuckets = DETAILED_AGE_BUCKETS.map((bucket) => {
+  const detailedAgeRows = analyzed.filter((row) => row.ageMode === "detailed" || row.ageMode === "api-billable");
+  const apiPlanningRows = analyzed.filter((row) => row.ageMode === "api-billable");
+  const displayAgeBuckets = marketplace === "CA" && apiPlanningRows.length
+    ? [...DETAILED_AGE_BUCKETS.slice(0, 7), "365+"]
+    : DETAILED_AGE_BUCKETS;
+  const ageBuckets = displayAgeBuckets.map((bucket) => {
     const rowsWithUnits = detailedAgeRows.filter((row) => valueOrZero(row.age?.[bucket]) > 0);
     return {
       bucket,
@@ -828,6 +904,7 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
   const warnings = [];
   if (!byType.charge.length) warnings.push("未识别仓储收费报告：重量、体积、仓储费、清算处理费和移除费可能无法完整测算。");
   if (!detailedAgeRows.length) warnings.push("未识别详细库龄数据：UK/DE 的 241–270 天库存无法从合并区间中准确拆分。");
+  if (apiPlanningRows.length) warnings.push("API 的 inv-age-* 是普通库龄件数；quantity-to-be-charged-ais-* 才是 Amazon 预计附加费计费件数。本页处置数量采用后者，预计费用不是实际账单。");
   if (!analyzed.some((row) => row.price > 0)) warnings.push("未识别售价数据：缺少价格的 SKU 无法测算清算预计净回收。");
   if (!analyzed.some((row) => Number.isFinite(row.productCost))) warnings.push("未提供采购成本占售价比例或单件金额：清算预计净回收不能换算为账面损益。");
   if (!analyzed.some((row) => Number.isFinite(row.fulfillmentFee))) warnings.push("未提供 FBA 配送费占售价比例或单件金额：不能计算正常销售单件净回款和完整利润。");
@@ -851,6 +928,8 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
       transfer: sum("transfer"),
       excess: sum("excess"),
       aged: sum("aged"),
+      generalAged: sum("generalAged"),
+      apiPlanningSkuCount: apiPlanningRows.length,
       actionUnits: sum("actionUnits"),
       cappedActionUnits: analyzed.reduce((total, row) => total + Math.min(row.actionUnits, row.available), 0),
       storage: sum("storageEstimate"),
@@ -881,11 +960,15 @@ export function analyzeSources(parsedSources, marketplace = "US", options = {}) 
       readiness: {
         price: analyzed.filter((row) => row.price > 0).length,
         fee: countReady("removalFee"),
+        storageEstimate: countReady("storageEstimate"),
+        agedFee: countReady("agedFee"),
         age: analyzed.filter((row) => sumAge(row.age) > 0).length,
         detailedAge: detailedAgeRows.length,
         productCost: countReady("productCost"),
         fulfillmentFee: countReady("fulfillmentFee"),
         firstMile: countReady("firstMileCost"),
+        saleTerms: analyzed.filter((row) => row.price > 0 && Number.isFinite(row.referralFee)).length,
+        threeCosts: analyzed.filter((row) => Number.isFinite(row.productCost) && Number.isFinite(row.fulfillmentFee) && Number.isFinite(row.firstMileCost)).length,
         saleProfit: countReady("normalSaleFullProfitPerUnit"),
         bookPnl: actionRows.filter((row) => Number.isFinite(row.liquidationBookProfit)).length,
         removalLoss: actionRows.filter((row) => Number.isFinite(row.removalTotalLoss)).length,

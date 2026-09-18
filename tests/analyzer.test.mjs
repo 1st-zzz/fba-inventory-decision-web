@@ -30,6 +30,53 @@ test("detects the six supported report types", () => {
   assert.equal(detectReportType(["seller-sku", "estimated-referral-fee-per-item"]), "commission");
   assert.equal(detectReportType(["seller-sku", "item-name", "asin1"]), "products");
   assert.equal(detectReportType(["seller-sku", "unit-cost-rate", "fulfillment-fee-rate", "first-mile-cost-rate"]), "costs");
+  assert.equal(detectReportType(["sku", "available", "quantity-to-be-charged-ais-181-210-days"]), "planning");
+  assert.equal(detectReportType(["sku", "estimated-referral-fee-per-unit"]), "commission");
+});
+
+test("API planning separates ordinary age stock from billable AIS and uses Amazon's estimated fee", () => {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+    ["sku", "fnsku", "asin", "available", "units-shipped-t30", "your-price", "inv-age-0-to-90-days", "inv-age-91-to-180-days", "inv-age-181-to-270-days", "quantity-to-be-charged-ais-181-210-days", "estimated-ais-181-210-days", "Inventory age snapshot date"],
+    ["DEMO-API-001", "X00DEMO001", "B0DEMO0001", 20, 2, 25, 10, 2, 8, 5, 1.75, "2026-09-15"],
+  ]), "Planning");
+  const sources = workbookToSources(workbook, "api-planning.tsv", XLSX, "US");
+  assert.equal(sources[0].type, "planning");
+  const result = analyzeSources(sources, "US", { analysisDate: "2026-09-18" });
+  assert.equal(result.summary.generalAged, 8);
+  assert.equal(result.summary.actionUnits, 5);
+  assert.equal(result.summary.agedFee, 1.75);
+  assert.equal(result.summary.apiPlanningSkuCount, 1);
+  assert.equal(result.summary.ageBuckets.find((bucket) => bucket.bucket === "181-210").units, 5);
+  assert.equal(result.rows[0].age["0-180"], 12);
+  assert.equal(result.summary.ageSnapshot, "2026-09-15");
+});
+
+test("Canada API planning keeps the 365-plus band without inventing a 366-455 split", () => {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+    ["sku", "available", "inv-age-181-to-270-days", "inv-age-271-to-365-days", "inv-age-365-plus-days", "quantity-to-be-charged-ais-181-210-days", "estimated-ais-181-210-days", "quantity-to-be-charged-ais-365-plus-days", "estimated-ais-365-plus-days"],
+    ["DEMO-CA-001", 20, 4, 3, 6, 2, 0.5, 5, 3.25],
+  ]), "Planning");
+  const result = analyzeSources(workbookToSources(workbook, "api-ca.tsv", XLSX, "CA"), "CA", { analysisDate: "2026-09-18" });
+  assert.equal(result.summary.generalAged, 13);
+  assert.equal(result.summary.actionUnits, 7);
+  assert.equal(result.summary.agedFee, 3.75);
+  assert.equal(result.summary.ageBuckets.at(-1).bucket, "365+");
+  assert.equal(result.summary.ageBuckets.at(-1).units, 5);
+});
+
+test("API planning rejects cross-market currency and negative billable counts", () => {
+  const makeWorkbook = (currency, count) => {
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+      ["sku", "available", "currency", "quantity-to-be-charged-ais-181-210-days", "estimated-ais-181-210-days"],
+      ["DEMO-API-001", 10, currency, count, 1.5],
+    ]), "Planning");
+    return workbook;
+  };
+  assert.throws(() => workbookToSources(makeWorkbook("CAD", 2), "api.tsv", XLSX, "US"), /币种/);
+  assert.throws(() => workbookToSources(makeWorkbook("USD", -2), "api.tsv", XLSX, "US"), /非负整数/);
 });
 
 test("parses and merges synthetic reports without server state", () => {
