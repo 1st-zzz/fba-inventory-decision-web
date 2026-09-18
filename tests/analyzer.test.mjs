@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import * as XLSX from "xlsx";
 import {
   analyzeSources,
+  billableInventoryRows,
   createDemoAnalysis,
   detectReportType,
   exportRowsToCsv,
@@ -50,6 +51,16 @@ test("API planning separates ordinary age stock from billable AIS and uses Amazo
   assert.equal(result.summary.ageBuckets.find((bucket) => bucket.bucket === "181-210").units, 5);
   assert.equal(result.rows[0].age["0-180"], 12);
   assert.equal(result.summary.ageSnapshot, "2026-09-15");
+});
+
+test("billable view hides non-charged SKUs but keeps missing fee estimates visible", () => {
+  const rows = [
+    { sku: "DEMO-NO-CHARGE", actionUnits: 0, agedFee: 0 },
+    { sku: "DEMO-CHARGED", actionUnits: 3, agedFee: 1.2 },
+    { sku: "DEMO-FEE-PENDING", actionUnits: 2, agedFee: null },
+  ];
+  assert.deepEqual(billableInventoryRows(rows).map((row) => row.sku), ["DEMO-CHARGED", "DEMO-FEE-PENDING"]);
+  assert.equal(rows.length, 3, "filtering must not erase source rows");
 });
 
 test("Canada API planning keeps the 365-plus band without inventing a 366-455 split", () => {

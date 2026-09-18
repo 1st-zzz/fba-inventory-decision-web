@@ -337,6 +337,11 @@ function sumAge(age) {
   return Object.values(age || {}).reduce((sum, value) => sum + valueOrZero(value), 0);
 }
 
+export function billableInventoryRows(rows) {
+  // A missing fee estimate is not proof of exemption; use the billed-unit basis.
+  return rows.filter((row) => Number.isFinite(row.actionUnits) && row.actionUnits > 0);
+}
+
 function agedUnits(item, rule) {
   const age = item.age || {};
   if (item.ageMode === "detailed" || item.ageMode === "api-billable") {
